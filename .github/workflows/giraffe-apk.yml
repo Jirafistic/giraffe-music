@@ -36,6 +36,10 @@ jobs:
           if [ -n "$KS" ]; then
             echo "$KS" | base64 -d > "$RUNNER_TEMP/giraffe.jks"
             echo "GIRAFFE_KEYSTORE=$RUNNER_TEMP/giraffe.jks" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Un release firmado con otra llave no se podría instalar encima: mejor no publicar.
+            echo "::error::Faltan los secretos GIRAFFE_KEYSTORE_B64 / GIRAFFE_KEYSTORE_PASSWORD / GIRAFFE_KEY_ALIAS"
+            exit 1
           fi
       - name: Build
         working-directory: mobile
