@@ -47,8 +47,17 @@ jobs:
         with: { workspaces: mobile }
       - run: cargo install cargo-ndk --locked
       - name: Llave de firma
-        env: { KS: "${{ secrets.GIRAFFE_KEYSTORE_B64 }}" }
+        env:
+          KS: "${{ secrets.GIRAFFE_KEYSTORE_B64 }}"
+          HAS_PW: "${{ secrets.GIRAFFE_KEYSTORE_PASSWORD != '' }}"
+          HAS_ALIAS: "${{ secrets.GIRAFFE_KEY_ALIAS != '' }}"
+          AS_VARS: "${{ vars.GIRAFFE_KEYSTORE_B64 != '' || vars.GIRAFFE_KEYSTORE_PASSWORD != '' || vars.GIRAFFE_KEY_ALIAS != '' }}"
         run: |
+          # Dice qué secreto falta (nunca muestra su valor).
+          echo "Secretos vistos: llave=$([ -n "$KS" ] && echo sí || echo NO) contraseña=$HAS_PW alias=$HAS_ALIAS"
+          if [ "$AS_VARS" = true ]; then
+            echo "::error::Los datos de la llave están guardados como *Variables* (públicas). Borralos de la pestaña Variables y crealos en la pestaña *Secrets*."
+          fi
           if [ -n "$KS" ]; then
             echo "$KS" | base64 -d > "$RUNNER_TEMP/giraffe.jks"
             echo "GIRAFFE_KEYSTORE=$RUNNER_TEMP/giraffe.jks" >> "$GITHUB_ENV"
