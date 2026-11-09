@@ -583,9 +583,26 @@ function go(path) {
 const wideTh = (t) => !settings.squareThumbs && (t.wide || t.video);
 const eb = (t) => (t.explicit ? '<span class="eb">E</span>' : '');
 const dlb = (t) => `<svg class="dlb" data-dlb="${esc(t.id)}"${DL.has(t.id) ? '' : ' hidden'}><use href="#i-dl-mini"/></svg>`;
+// Sin carátula: el cuadro gris con una nota, como YouTube Music.
+const NOART = `<svg class="noart" viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/></svg>`;
+/** Direcciones de carátula que el WebView puede cargar: siempre https (sin "//…" ni http). */
+const fixUrl = (u) => !u ? '' : u.startsWith('//') ? 'https:' + u : u.replace(/^http:\/\/(?!127\.0\.0\.1|localhost)/, 'https://');
 function thumbImg(src, w = 48, cls = '') {
-  return src ? `<img src="${esc(src)}" loading="lazy" decoding="async" width="${w}" height="${w}" alt=""${cls ? ` class="${cls}"` : ''}>` : '';
+  return src ? `<img src="${esc(fixUrl(src))}" loading="lazy" decoding="async" width="${w}" height="${w}" alt=""${cls ? ` class="${cls}"` : ''}>` : NOART;
 }
+/** Una carátula que no carga (video borrado, miniatura que no existe, enlace raro): primero
+ *  la versión que siempre existe o pasando por el servidor de la app; si tampoco, el cuadro
+ *  gris en vez del ícono de imagen rota. Un solo escuchador para todas las imágenes. */
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (img.tagName !== 'IMG' || img.id === 'plArt' || !img.closest('.th, .art, .cover, .m-head, .ed-cover')) return;
+  const src = img.getAttribute('src') || '', tries = +(img.dataset.f || 0);
+  img.dataset.f = tries + 1;
+  const vi = src.match(/^https:\/\/i\d?\.ytimg\.com\/vi\/([^/]+)\/(?!hqdefault)/);
+  if (tries === 0 && vi) { img.src = `https://i.ytimg.com/vi/${vi[1]}/hqdefault.jpg`; return; }
+  if (tries <= 1 && /^https?:/.test(src)) { img.src = imgUrl(src); return; }
+  img.replaceWith(document.createRange().createContextualFragment(NOART));
+}, true);
 /** Una fila de canción. `sub`: qué va después del artista. */
 function rowHTML(t, k, i, { sub = 'album', num = null, rank = null, handle = false, cls = '' } = {}) {
   const extra = sub === 'album' && t.album?.name ? ` • ${esc(t.album.name)}` : sub === 'dur' && t.duration ? ` • ${fmt(t.duration)}` : sub === 'plays' && t.plays ? ` • ${fmtN(t.plays)} plays` : '';
