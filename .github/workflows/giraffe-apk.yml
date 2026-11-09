@@ -57,9 +57,17 @@ jobs:
           done
       - uses: actions/upload-artifact@v4
         with: { name: giraffe-music-apk, path: out/*.apk }
+      - name: Notas del release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # mobile/release-notes/vX.Y.Z.md si existe; si no, un texto corto.
+          f="mobile/release-notes/${GITHUB_REF_NAME}.md"
+          [ -f "$f" ] || { echo "Giraffe Music ${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/notes.md"; f="$RUNNER_TEMP/notes.md"; }
+          echo "NOTES=$f" >> "$GITHUB_ENV"
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: Giraffe Music ${{ github.ref_name }}
           files: out/*.apk
-          generate_release_notes: true
+          body_path: ${{ env.NOTES }}
