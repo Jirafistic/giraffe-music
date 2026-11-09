@@ -1,0 +1,61 @@
+# Giraffe Music: compila el APK. Con una etiqueta "v0.3.0" (git tag v0.3.0 && git push --tags)
+# además publica el release, que es de donde la app baja sus actualizaciones.
+#
+# Secretos del repo (Settings → Secrets and variables → Actions):
+#   GIRAFFE_KEYSTORE_B64       la llave de firma en base64 (base64 -w0 mi-llave.jks)
+#   GIRAFFE_KEYSTORE_PASSWORD  su contraseña
+#   GIRAFFE_KEY_ALIAS          el alias de la llave
+# Sin ellos se firma con la llave de depuración (solo para probar: no se puede actualizar encima).
+name: Giraffe Music APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0"
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android" }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: mobile }
+      - run: cargo install cargo-ndk --locked
+      - name: Llave de firma
+        env: { KS: "${{ secrets.GIRAFFE_KEYSTORE_B64 }}" }
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/giraffe.jks"
+            echo "GIRAFFE_KEYSTORE=$RUNNER_TEMP/giraffe.jks" >> "$GITHUB_ENV"
+          fi
+      - name: Build
+        working-directory: mobile
+        env:
+          ANDROID_NDK_HOME: "${{ env.ANDROID_HOME }}/ndk/27.2.12479018"
+          GIRAFFE_KEYSTORE_PASSWORD: "${{ secrets.GIRAFFE_KEYSTORE_PASSWORD }}"
+          GIRAFFE_KEY_ALIAS: "${{ secrets.GIRAFFE_KEY_ALIAS }}"
+        run: |
+          [ -n "$GIRAFFE_KEYSTORE_PASSWORD" ] || unset GIRAFFE_KEYSTORE_PASSWORD GIRAFFE_KEY_ALIAS
+          ./build-apk.sh
+          mkdir -p ../out
+          for f in android/app/build/outputs/apk/release/app-*-release.apk; do
+            abi=$(basename "$f" | sed 's/^app-//; s/-release.apk$//')
+            cp "$f" "../out/giraffe-music-$abi.apk"
+          done
+      - uses: actions/upload-artifact@v4
+        with: { name: giraffe-music-apk, path: out/*.apk }
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
+          generate_release_notes: true

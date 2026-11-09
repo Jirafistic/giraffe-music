@@ -1,0 +1,57 @@
+[package]
+name = "giraffe-music"
+version = "0.3.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "Giraffe Music: el núcleo de ytm-rs para Android, con la interfaz de YouTube Music móvil"
+
+# Independiente del crate de escritorio (que sigue igual): no es parte de su build.
+[workspace]
+
+[lib]
+name = "giraffe"
+# rlib para el binario de escritorio; cdylib es libgiraffe.so dentro del APK.
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "giraffe-music"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "fs", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+env_logger = { version = "0.11", default-features = false, features = ["humantime"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }
+url = "2"
+bytes = "1"
+# Lo que piden los módulos de ytm-rs que se reutilizan tal cual (ver src/main.rs).
+egui = { path = "shim-egui", package = "egui-shim" }
+localzone = "0.3"
+sha1 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+unicode-normalization = "0.1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
+android_logger = "0.14"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+panic = "unwind"
+codegen-units = 1
+strip = true
+
+[dev-dependencies]
+directories = "6"

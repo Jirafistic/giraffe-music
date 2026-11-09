@@ -69,10 +69,15 @@ pub async fn album_queue(http: &reqwest::Client, playlist_id: &str) -> anyhow::R
 
 /// `opus`: Opus (itag 251, about 130-160 kbps) when the song has it, else AAC.
 pub async fn audio_stream(http: &reqwest::Client, video_id: &str, visitor_data: &str, opus: bool) -> anyhow::Result<Stream> {
-    let resp = player(http, video_id, visitor_data).await?;
     // Opus in WebM (251) when asked for; AAC-LC in MP4 (140), HE-AAC (139) as fallbacks.
-    let formats = resp["streamingData"]["adaptiveFormats"].as_array().map(Vec::as_slice).unwrap_or_default();
     let itags: &[u64] = if opus { &[251, 140, 139] } else { &[140, 139] };
+    audio_stream_itags(http, video_id, visitor_data, itags).await
+}
+
+/// Like [`audio_stream`], with the formats to try in order (e.g. `[139, 140]` to save data).
+pub async fn audio_stream_itags(http: &reqwest::Client, video_id: &str, visitor_data: &str, itags: &[u64]) -> anyhow::Result<Stream> {
+    let resp = player(http, video_id, visitor_data).await?;
+    let formats = resp["streamingData"]["adaptiveFormats"].as_array().map(Vec::as_slice).unwrap_or_default();
     itags
         .iter()
         .find_map(|itag| {

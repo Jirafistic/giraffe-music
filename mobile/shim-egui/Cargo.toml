@@ -1,0 +1,8 @@
+[package]
+name = "egui-shim"
+version = "0.1.0"
+edition = "2024"
+description = "Los dos tipos de egui que nombra model.rs, sin traer egui entero al APK"
+
+[lib]
+name = "egui"

@@ -1,3 +1,7 @@
+> **🦒 Giraffe Music** — la app de Android de este repo está en [`mobile/`](mobile/README.md):
+> la interfaz de YouTube Music, sin anuncios y cuidando la batería, hecha sobre el núcleo en
+> Rust de ytm-rs. Las versiones para instalar están en [Releases](../../releases).
+
 <div align="center">
   <img src="assets/icon/icon.png" alt="ytm-rs app icon" width="96">
   <h1>ytm-rs</h1>
