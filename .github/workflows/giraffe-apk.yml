@@ -65,6 +65,12 @@ jobs:
             # Un release firmado con otra llave no se podría instalar encima: mejor no publicar.
             echo "::error::Faltan los secretos GIRAFFE_KEYSTORE_B64 / GIRAFFE_KEYSTORE_PASSWORD / GIRAFFE_KEY_ALIAS"
             exit 1
+          else
+            # Prueba sin llave: se firma con una de depuración creada en el momento.
+            d="$HOME/.config/.android"; mkdir -p "$d"
+            keytool -genkeypair -keystore "$d/debug.keystore" -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" -noprompt
           fi
       - name: Build
         working-directory: mobile
