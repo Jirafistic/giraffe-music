@@ -1,5 +1,6 @@
-# Giraffe Music: compila el APK. Con una etiqueta "v0.3.0" (git tag v0.3.0 && git push --tags)
-# además publica el release, que es de donde la app baja sus actualizaciones.
+# Giraffe Music: compila el APK y publica el release, que es de donde la app baja sus
+# actualizaciones. Para publicar: pestaña Actions → "Giraffe Music APK" → Run workflow →
+# escribí la versión (ej. v0.3.0). También publica si se empuja una etiqueta vX.Y.Z.
 #
 # Secretos del repo (Settings → Secrets and variables → Actions):
 #   GIRAFFE_KEYSTORE_B64       la llave de firma en base64 (base64 -w0 mi-llave.jks)
@@ -10,6 +11,11 @@ name: Giraffe Music APK
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión a publicar (ej. v0.3.0). Vacío: solo compilar."
+        required: false
+        default: ""
   push:
     tags: ["v*"]
 
@@ -19,6 +25,9 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    env:
+      # La versión que se publica: la del botón "Run workflow" o la de la etiqueta empujada.
+      VERSION: ${{ inputs.version || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || '') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -36,7 +45,7 @@ jobs:
           if [ -n "$KS" ]; then
             echo "$KS" | base64 -d > "$RUNNER_TEMP/giraffe.jks"
             echo "GIRAFFE_KEYSTORE=$RUNNER_TEMP/giraffe.jks" >> "$GITHUB_ENV"
-          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          elif [ -n "$VERSION" ]; then
             # Un release firmado con otra llave no se podría instalar encima: mejor no publicar.
             echo "::error::Faltan los secretos GIRAFFE_KEYSTORE_B64 / GIRAFFE_KEYSTORE_PASSWORD / GIRAFFE_KEY_ALIAS"
             exit 1
@@ -58,16 +67,21 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: giraffe-music-apk, path: out/*.apk }
       - name: Notas del release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.VERSION != ''
         run: |
-          # mobile/release-notes/vX.Y.Z.md si existe; si no, un texto corto.
-          f="mobile/release-notes/${GITHUB_REF_NAME}.md"
-          [ -f "$f" ] || { echo "Giraffe Music ${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/notes.md"; f="$RUNNER_TEMP/notes.md"; }
+          # La versión siempre con "v" adelante; notas de mobile/release-notes/vX.Y.Z.md si existe.
+          v="v${VERSION#v}"
+          echo "TAG=$v" >> "$GITHUB_ENV"
+          f="mobile/release-notes/$v.md"
+          [ -f "$f" ] || { echo "Giraffe Music ${v#v}" > "$RUNNER_TEMP/notes.md"; f="$RUNNER_TEMP/notes.md"; }
           echo "NOTES=$f" >> "$GITHUB_ENV"
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.VERSION != ''
         uses: softprops/action-gh-release@v2
         with:
-          name: Giraffe Music ${{ github.ref_name }}
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Giraffe Music ${{ env.TAG }}
           files: out/*.apk
           body_path: ${{ env.NOTES }}
+          make_latest: true
