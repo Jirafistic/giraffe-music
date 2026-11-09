@@ -1,3 +1,7 @@
+# Giraffe Music
+
+A YouTube Music client that respects the platform's own interface.
+
 > **🦒 Giraffe Music** — la app de Android de este repo está en [`mobile/`](mobile/README.md):
 > la interfaz de YouTube Music, sin anuncios y cuidando la batería, hecha sobre el núcleo en
 > Rust de ytm-rs. Las versiones para instalar están en [Releases](../../releases).
