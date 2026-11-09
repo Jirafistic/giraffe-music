@@ -89,6 +89,7 @@ const DL = {
       await fetch('/api/download/' + encodeURIComponent(t.id), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(t) }).catch(() => {});
     }
     this.wasActive = new Set([...(this.wasActive || []), ...tracks.map((t) => t.id)]);
+    NATIVE?.dlWatch?.();
     toast(tracks.length > 1 ? `Downloading ${tracks.length} songs` : 'Downloading…');
     dlUI();
     this.refresh();
@@ -228,6 +229,7 @@ class NativeEngine {
     else if (m.e === 'vis') { if (m.hidden) saveSession(true); visible = !m.hidden; ticker(); videoSync(); if (visible) NATIVE.sync(); }
     else if (m.e === 'insets') setInsets(m.top, m.bottom);
     else if (m.e === 'login') onLoginCookie(m.cookie);
+    else if (m.e === 'checkUpdate') checkUpdate(true);
     else if (m.e === 'update') {
       if (m.need) toast('Allow Giraffe Music to install updates, then tap Update again');
       else if (m.error) toast("Couldn't download the update");
@@ -1981,7 +1983,7 @@ if (NATIVE) {
     NATIVE.setPref('qMobile', settings.qMobile); NATIVE.setPref('qWifi', settings.qWifi);
     NATIVE.setPref('resumeHeadphones', settings.resumeHeadphones ? '1' : '0');
   } catch {}
-  setTimeout(() => checkUpdate(false), 4000);
+  setTimeout(() => checkUpdate(NATIVE?.takeUpdateIntent?.() === true), 4000);
 }
 // Fuera del APK: que la app quede guardada en el teléfono (funciona sin red).
 if (!NATIVE && 'serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

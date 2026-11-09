@@ -1,6 +1,6 @@
 [package]
 name = "giraffe-music"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "GPL-3.0-only"
 description = "Giraffe Music: el núcleo de ytm-rs para Android, con la interfaz de YouTube Music móvil"

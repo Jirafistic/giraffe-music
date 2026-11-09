@@ -56,6 +56,11 @@ class MainActivity : ComponentActivity() {
     private var insetTop = 0
     private var insetBottom = 0
 
+    /** Permiso de notificaciones (Android 13+): se pide una sola vez, al abrir la app. */
+    private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    /** La app se abrió desde el aviso de versión nueva: la interfaz muestra el diálogo de actualizar. */
+    private var openedForUpdate = false
+
     /** Vuelve de la ventana de Google con la cookie de sesión (o sin nada si se canceló). */
     private val loginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         val cookie = r.data?.getStringExtra("cookie")
@@ -72,6 +77,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         port = Native.start(filesDir.absolutePath)
+        openedForUpdate = intent?.getBooleanExtra(Notifier.EXTRA_UPDATE, false) == true
+        if (openedForUpdate) Notifier.clearUpdate(this)
+        Notifier.scheduleUpdateCheck(this)
+        val prefs = getSharedPreferences("giraffe", Context.MODE_PRIVATE)
+        if (Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedNotif", false)) {
+            prefs.edit().putBoolean("askedNotif", true).apply()
+            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         web = WebView(this).apply {
             setBackgroundColor(0xFF030303.toInt())
@@ -165,6 +178,14 @@ class MainActivity : ComponentActivity() {
         // cuando cambia la canción, para la cola y el autoplay); la música es nativa.
         main.post { web.onPause() }
         super.onStop()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(Notifier.EXTRA_UPDATE, false)) {
+            Notifier.clearUpdate(this)
+            emit(JSONObject().put("e", "checkUpdate"))
+        }
     }
 
     override fun onDestroy() {
@@ -412,6 +433,13 @@ class MainActivity : ComponentActivity() {
                 }
             }.start()
         }
+
+        /** Hay descargas nuevas: la notificación las sigue hasta que terminen. */
+        @JavascriptInterface
+        fun dlWatch() = Notifier.watchDownloads(this@MainActivity, port)
+
+        @JavascriptInterface
+        fun takeUpdateIntent(): Boolean = openedForUpdate.also { openedForUpdate = false }
 
         @JavascriptInterface
         fun login() = main.post { loginLauncher.launch(Intent(this@MainActivity, LoginActivity::class.java)) }

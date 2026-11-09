@@ -196,6 +196,7 @@ impl Downloads {
 pub fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/downloads", get(list).delete(clear))
+        .route("/api/downloads/active", get(active))
         .route("/api/download/{id}", post(start).delete(remove))
         .route("/api/dl/cover/{id}", get(cover))
 }
@@ -204,6 +205,12 @@ async fn list(State(app): State<Arc<App>>) -> Response {
     let mut r = Json(app.downloads.list()).into_response();
     r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     r
+}
+
+/// Solo las descargas en curso (id → progreso): lo que consulta la notificación.
+async fn active(State(app): State<Arc<App>>) -> Response {
+    let a = app.downloads.active.lock().unwrap().clone();
+    Json(a).into_response()
 }
 
 async fn remove(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
