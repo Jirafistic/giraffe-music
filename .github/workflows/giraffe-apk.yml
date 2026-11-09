@@ -29,11 +29,18 @@ jobs:
       # La versión que se publica: la del botón "Run workflow" o la de la etiqueta empujada.
       VERSION: ${{ inputs.version || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || '') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: "17" }
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0"
+      # El Android SDK ya viene instalado en las máquinas de GitHub: solo se agregan las piezas.
+      - name: Android SDK
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          sm=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sm" --licenses > /dev/null || true
+          "$sm" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$sdk/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android" }
       - uses: Swatinem/rust-cache@v2
@@ -53,7 +60,6 @@ jobs:
       - name: Build
         working-directory: mobile
         env:
-          ANDROID_NDK_HOME: "${{ env.ANDROID_HOME }}/ndk/27.2.12479018"
           GIRAFFE_KEYSTORE_PASSWORD: "${{ secrets.GIRAFFE_KEYSTORE_PASSWORD }}"
           GIRAFFE_KEY_ALIAS: "${{ secrets.GIRAFFE_KEY_ALIAS }}"
         run: |
@@ -64,7 +70,7 @@ jobs:
             abi=$(basename "$f" | sed 's/^app-//; s/-release.apk$//')
             cp "$f" "../out/giraffe-music-$abi.apk"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: giraffe-music-apk, path: out/*.apk }
       - name: Notas del release
         if: env.VERSION != ''
