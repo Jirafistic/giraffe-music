@@ -11,8 +11,8 @@ android {
         applicationId = "com.giraffe.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.3.1"
         // El repo de GitHub de donde salen las actualizaciones ("usuario/repo"), en gradle.properties.
         buildConfigField("String", "UPDATE_REPO", "\"${project.findProperty("giraffe.updateRepo") ?: ""}\"")
     }
