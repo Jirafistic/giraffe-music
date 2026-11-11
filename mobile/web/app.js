@@ -111,10 +111,9 @@ const DL = {
       return toast('Downloads are set to Wi-Fi only', { label: 'Download now', fn: () => this.add(tracks, true, batch) });
     }
     this.batches.push({ ...batch, single: tracks.length === 1 && !batch.playlistId, tracks, ids: new Set(tracks.map((t) => t.id)) });
-    for (const t of tracks) {
-      this.active[t.id] = 0;
-      await fetch('/api/download/' + encodeURIComponent(t.id), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(t) }).catch(() => {});
-    }
+    for (const t of tracks) this.active[t.id] = 0;
+    // Toda la tanda en un solo pedido (una playlist de 300 canciones ya no son 300 pedidos).
+    await fetch('/api/downloads', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(tracks) }).catch(() => {});
     this.wasActive = new Set([...(this.wasActive || []), ...tracks.map((t) => t.id)]);
     NATIVE?.dlWatch?.();
     toast(tracks.length > 1 ? `Downloading ${tracks.length} songs` : 'Downloading…');
@@ -127,6 +126,18 @@ const DL = {
     this.items.delete(id);
     dlUI();
     toast('Removed from downloads');
+  },
+  /** Quitar las descargas de toda una playlist o álbum (y cancelar las que estaban bajando). */
+  async removeMany(tracks) {
+    const ids = tracks.map((t) => t.id).filter((id) => this.has(id) || this.busy(id));
+    for (const id of ids) {
+      delete this.active[id];
+      await fetch('/api/download/' + encodeURIComponent(id), { method: 'DELETE' }).catch(() => {});
+      this.items.delete(id);
+    }
+    dlUI();
+    if (location.pathname === '/downloads') render(scrollY);
+    toast(ids.length === 1 ? 'Removed from downloads' : `Removed ${ids.length} songs from downloads`);
   },
 };
 
@@ -1855,6 +1866,7 @@ function openMenu(head, items, ctx) {
 }
 const MENU = {
   mShareUrl: ({ name, url }) => share(name, url),
+  mRmDl: ({ tracks, name }) => setTimeout(() => askRemoveDownloads(tracks, name), 250),
   mDelLocal: ({ id }) => { ACT.delLocalPl({ dataset: { id } }); },
   mRadio: ({ t }) => P.radio(t),
   mNext: ({ t, tracks }) => P.playNext(tracks || [t]),
@@ -2004,12 +2016,13 @@ const ACT = {
     openMenu(`<div class="m-head"><div class="tx"><div class="t1">${esc(l.name)}</div><div class="t2">${l.tracks.length} songs</div></div></div>`, [
       ['shuffle', 'Shuffle play', 'mShuffle'], ['radio', 'Start radio', 'mListRadio'], ['playnext', 'Play next', 'mNext'], ['queue', 'Add to queue', 'mQueue'], ['dl', 'Download', 'mDlAll'],
       ['save', 'Save to playlist', 'mToPlaylist'],
+      ...(l.tracks.some((t) => DL.has(t.id) || DL.busy(t.id)) ? [['delete', 'Remove downloads', 'mRmDl']] : []),
     ], { tracks: l.tracks, name: l.name, id: l.playlistId });
   },
   dlAll: (el) => {
     const l = LISTS.get(el.dataset.list);
     if (!l?.tracks.length) return;
-    if (l.tracks.every((t) => DL.has(t.id) || DL.failed.has(t.id))) return toast('Already downloaded');
+    if (l.tracks.some((t) => DL.busy(t.id)) || l.tracks.every((t) => DL.has(t.id) || DL.failed.has(t.id))) return askRemoveDownloads(l.tracks, l.name);
     DL.add(l.tracks.filter((t) => !DL.failed.has(t.id)), false, { name: l.name, playlistId: l.playlistId });
   },
   shareList: (el) => { const l = LISTS.get(el.dataset.list); share(l?.name || 'Giraffe Music', location.href.startsWith('http://127.') ? 'https://music.youtube.com/' : location.href); },
@@ -2114,6 +2127,7 @@ const ACT = {
     } catch {}
     const url = kind === 'album' ? `https://music.youtube.com/browse/${id}` : `https://music.youtube.com/playlist?list=${String(id).replace(/^VL/, '')}`;
     const items = tracks.length ? [['shuffle', 'Shuffle play', 'mShuffle'], ['playnext', 'Play next', 'mNext'], ['queue', 'Add to queue', 'mQueue'], ['dl', 'Download', 'mDlAll']] : [];
+    if (tracks.some((t) => DL.has(t.id) || DL.busy(t.id))) items.push(['delete', 'Remove downloads', 'mRmDl']);
     if (!isLocalPl(id) && kind !== 'liked') items.push(['share', 'Share', 'mShareUrl']);
     if (isLocalPl(id)) items.push(['delete', 'Delete playlist', 'mDelLocal']);
     openMenu(`<div class="m-head"><div class="tx"><div class="t1">${esc(T(title))}</div><div class="t2"><span>${tracks.length ? songs(tracks.length) : ''}</span></div></div></div>`, items, { tracks, name: title, url, id });
@@ -2132,6 +2146,7 @@ const ACT = {
   },
   migMove: () => migrateLocal(),
   nfKeep: () => { nfOffer = null; popOv(); dlUI(); },
+  rmDlYes: () => { const t = rmDlTracks; rmDlTracks = null; popOv(); if (t) DL.removeMany(t); },
   nfRemove: () => removeMissing(),
   doUpdate: (el) => { const u = el.dataset.url; popOv(); toast('Downloading update…'); NATIVE?.installUpdate(u); },
   checkUpdate: () => checkUpdate(true),
@@ -2443,7 +2458,16 @@ async function onLoginCookie(cookie) {
   } catch (e) { toast("Couldn't sign in. Try again."); }
 }
 /** Al terminar de bajar una playlist: las que no se encontraron, ¿se quitan de la playlist? */
-let nfOffer = null;
+let nfOffer = null, rmDlTracks = null;
+/** "¿Quitar las descargas?" para una playlist o álbum (descargado o descargándose). */
+function askRemoveDownloads(tracks, name) {
+  const n = tracks.filter((t) => DL.has(t.id) || DL.busy(t.id)).length;
+  if (!n) return toast('Already downloaded');
+  rmDlTracks = tracks;
+  openDialog(`<h2>${esc(T('Remove downloads?'))}</h2>
+    <div class="t2" style="white-space:normal;margin-bottom:16px">${esc(T(n === 1 ? `1 song from “${name}” will be removed from this device.` : `${n} songs from “${name}” will be removed from this device.`))}</div>
+    <div class="dlg-btns"><button class="ghost" data-act="dlgCancel">Cancel</button><button class="ok" data-act="rmDlYes">Remove</button></div>`);
+}
 function offerRemoveMissing() {
   const o = nfOffer;
   if (!o) return;

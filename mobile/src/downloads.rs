@@ -222,7 +222,7 @@ impl Downloads {
 
 pub fn routes() -> Router<Arc<App>> {
     Router::new()
-        .route("/api/downloads", get(list).delete(clear))
+        .route("/api/downloads", get(list).delete(clear).post(start_many))
         .route("/api/downloads/active", get(active).delete(cancel_all))
         .route("/api/downloads/failed", axum::routing::delete(forget_failed))
         .route("/api/download/{id}", post(start).delete(remove))
@@ -295,6 +295,23 @@ struct Track {
     art: Option<String>,
 }
 
+/// Varias canciones de una vez (una playlist): una sola escritura de la lista de pendientes.
+async fn start_many(State(app): State<Arc<App>>, Json(tracks): Json<Vec<Value>>) -> Response {
+    let mut n = 0;
+    for t in tracks {
+        let Some(id) = t["id"].as_str().filter(|id| safe(id)).map(str::to_owned) else { continue };
+        if app.downloads.index.lock().unwrap().contains_key(&id) {
+            continue;
+        }
+        app.downloads.set_failed(&id, false);
+        app.downloads.pending.lock().unwrap().push(t.clone());
+        enqueue(&app, id, t, false);
+        n += 1;
+    }
+    app.downloads.save_pending();
+    Json(json!({"ok": true, "queued": n})).into_response()
+}
+
 /// Pone una canción en la cola de descargas (el cuerpo es la canción, como la da la API).
 async fn start(State(app): State<Arc<App>>, Path(id): Path<String>, Json(track): Json<Value>) -> Response {
     if !safe(&id) {
@@ -305,6 +322,18 @@ async fn start(State(app): State<Arc<App>>, Path(id): Path<String>, Json(track):
     }
     enqueue(&app, id, track, true);
     Json(json!({"ok": true})).into_response()
+}
+
+/// Problemas de conexión (vale la pena reintentar): sin red, tiempo agotado, errores 5xx/429.
+fn transient(e: &anyhow::Error) -> bool {
+    if e.chain().any(|c| c.downcast_ref::<reqwest::Error>().is_some_and(|r| r.is_timeout() || r.is_connect() || r.is_request() || r.is_body() || r.is_decode())) {
+        return true;
+    }
+    if e.chain().any(|c| c.downcast_ref::<std::io::Error>().is_some()) {
+        return true;
+    }
+    let s = format!("{e:#}").to_lowercase();
+    s.contains("timed out") || s.contains("googlevideo 5") || s.contains("googlevideo 429") || s.contains("vacío") || s.contains("error sending request") || s.contains("dns")
 }
 
 /// "No se encontró": YouTube respondió, pero sin audio para esa canción.
@@ -346,7 +375,12 @@ fn enqueue(app: &Arc<App>, id: String, track: Value, save: bool) {
             if !a.downloads.active.lock().unwrap().contains_key(&id) {
                 break;
             }
-            match download(&a, &id, track.clone()).await {
+            // Ninguna canción puede trabar la cola: como mucho 10 minutos cada una.
+            let got = match tokio::time::timeout(Duration::from_secs(600), download(&a, &id, track.clone())).await {
+                Ok(r) => r,
+                Err(_) => Err(anyhow::anyhow!("timed out: la canción tardó demasiado")),
+            };
+            match got {
                 Ok(()) => break,
                 Err(e) => {
                     log::warn!("descarga de {id} (intento {}): {e:#}", attempt + 1);
@@ -356,12 +390,16 @@ fn enqueue(app: &Arc<App>, id: String, track: Value, save: bool) {
                     }
                     // YouTube contestó pero no tiene la canción (borrada, privada, bloqueada):
                     // se prueba una vez más por las dudas y después se saltea, sin trabar la cola.
-                    if not_found(&e) && attempt >= 1 {
+                    // Si no es un problema de conexión (YouTube no la tiene, la bloquea, o los datos
+                    // de la canción vienen raros), no tiene sentido insistir: se saltea y se marca.
+                    if (not_found(&e) || !transient(&e)) && attempt >= 1 {
                         a.downloads.set_failed(&id, true);
                         break;
                     }
+                    // Sin internet un buen rato: queda pendiente para la próxima vez que se abra la app.
                     if attempt == 5 {
-                        break;
+                        a.downloads.active.lock().unwrap().remove(&id);
+                        return;
                     }
                     progress(&a, &id, 0.0);
                     tokio::time::sleep(Duration::from_secs([3, 10, 30, 60, 120][attempt as usize])).await;
@@ -396,7 +434,7 @@ async fn download(app: &Arc<App>, id: &str, raw: Value) -> anyhow::Result<()> {
         f.write_all(&wav).await?;
         (wav.len() as u64, "audio/wav")
     } else {
-        let mut r = api::resolve(app, id, false).await?;
+        let mut r = tokio::time::timeout(Duration::from_secs(30), api::resolve(app, id, false)).await.map_err(|_| anyhow::anyhow!("timed out pidiendo la canción"))??;
         loud = r.loudness;
         let mut pos = 0u64;
         let mut renewed = false;
@@ -408,9 +446,11 @@ async fn download(app: &Arc<App>, id: &str, raw: Value) -> anyhow::Result<()> {
                     Ok(b) if !b.is_empty() => break b.to_vec(),
                     Err(e) if e.to_string().contains("403") && !renewed => {
                         renewed = true;
-                        r = api::resolve(app, id, true).await?;
+                        r = tokio::time::timeout(Duration::from_secs(30), api::resolve(app, id, true)).await.map_err(|_| anyhow::anyhow!("timed out pidiendo la canción"))??;
                     }
                     Err(e) if tries >= 4 => return Err(e),
+                    // Respuesta vacía una y otra vez: se corta (antes podía quedar trabada para siempre).
+                    Ok(_) if tries >= 4 => anyhow::bail!("googlevideo respondió vacío"),
                     _ => {
                         tries += 1;
                         tokio::time::sleep(Duration::from_millis(500 * tries)).await;
@@ -471,7 +511,7 @@ async fn download(app: &Arc<App>, id: &str, raw: Value) -> anyhow::Result<()> {
     let artist = t.artists.iter().filter_map(|a| a["name"].as_str()).collect::<Vec<_>>().join(", ");
     let album = t.album.as_ref().and_then(|a| a["name"].as_str()).unwrap_or_default().to_owned();
     let q = LyricsQ { id: String::new(), title: t.title.clone(), artist, album, duration: t.duration };
-    let lyrics = api::lyrics_lookup(app, &q).await.ok();
+    let lyrics = tokio::time::timeout(Duration::from_secs(15), api::lyrics_lookup(app, &q)).await.ok().and_then(Result::ok);
 
     tokio::fs::rename(&part, d.file(id, "a")).await?;
     d.index.lock().unwrap().insert(id.to_owned(), Entry { track: raw, size, mime: mime.to_owned(), cover_mime, lyrics, at: now(), loudness: loud });
