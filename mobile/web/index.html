@@ -14,6 +14,8 @@
 <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
 <link rel="stylesheet" href="/app.css">
+<!-- Interfaz nueva (predeterminada) o la de antes: se decide antes de dibujar nada. -->
+<script src="/ui.js"></script>
 </head>
 <body>
 <!-- Íconos: un solo sprite, sin fuentes de íconos ni imágenes extra que bajar. -->
@@ -83,6 +85,10 @@
   <symbol id="i-logout" viewBox="0 0 24 24"><path d="m17 7-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 14h4v-4H3v4zm0 5h4v-4H3v4zM3 9h4V5H3v4zm5 5h13v-4H8v4zm0 5h13v-4H8v4zM8 5v4h13V5H8z"/></symbol>
   <symbol id="i-blank" viewBox="0 0 24 24"></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z"/></symbol>
+  <symbol id="i-bookmark-f" viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2z"/></symbol>
+  <symbol id="i-samples2" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M3 5.2v13.6L12.6 12zm2 3.8 4.2 3L5 15zM12 5.2v13.6L21.6 12zm2 3.8 4.2 3L14 15z"/></symbol>
+  <symbol id="i-samples2-f" viewBox="0 0 24 24"><path d="M3 5.2v13.6L12.6 12zM12 5.2v13.6L21.6 12z"/></symbol>
   <symbol id="i-person-add" viewBox="0 0 24 24"><path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 8c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm-6 4c.22-.72 3.31-2 6-2 2.7 0 5.8 1.29 6 2H9zm-3-3v-3h3v-2H6V7H4v3H1v2h3v3z"/></symbol>
   <symbol id="i-qr-scan" viewBox="0 0 24 24"><path d="M9.5 6.5v3h-3v-3h3M11 5H5v6h6V5zm-1.5 9.5v3h-3v-3h3M11 13H5v6h6v-6zm6.5-6.5v3h-3v-3h3M19 5h-6v6h6V5zm-6 8h1.5v1.5H13V13zm1.5 1.5H16V16h-1.5v-1.5zM16 13h1.5v1.5H16V13zm-3 3h1.5v1.5H13V16zm1.5 1.5H16V19h-1.5v-1.5zM16 16h1.5v1.5H16V16zm1.5-1.5H19V16h-1.5v-1.5zm0 3H19V19h-1.5v-1.5zM22 7h-2V4h-3V2h5v5zm0 15v-5h-2v3h-3v2h5zM2 22h5v-2H4v-3H2v5zM2 2v5h2V4h3V2H2z"/></symbol>
   <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></symbol>
@@ -106,8 +112,9 @@
   <div class="mini-prog"><i id="miniBar"></i></div>
   <img id="miniArt" class="mini-art" alt="" width="40" height="40">
   <div class="mini-text"><div id="miniTitle" class="t1"></div><div id="miniSub" class="t2"></div></div>
+  <button class="icon-btn new-only" data-act="cast" aria-label="Cast"><svg class="ic"><use href="#i-cast"/></svg></button>
   <button class="icon-btn" data-act="toggle" aria-label="Play/Pause"><svg class="ic"><use id="miniPlayIc" href="#i-play"/></svg></button>
-  <button class="icon-btn" data-act="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
+  <button class="icon-btn old-only" data-act="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
 </div>
 
 <nav id="nav" class="nav">
@@ -135,7 +142,7 @@
     <div class="pl-chips" id="plChips">
       <div class="chip-pair"><button data-act="like" aria-label="Like"><svg class="ic s20"><use id="plLikeIc" href="#i-like"/></svg><span id="plLikeN"></span></button><i></i><button data-act="dislike" aria-label="Dislike"><svg class="ic s20"><use id="plDislikeIc" href="#i-dislike"/></svg></button></div>
       <button class="pchip" data-act="sheet" data-tab="lyrics"><svg class="ic s20"><use href="#i-quote"/></svg><span>Lyrics</span></button>
-      <button class="pchip" data-act="sheet" data-tab="related" aria-label="Related"><svg class="ic s20"><use href="#i-related"/></svg></button>
+      <button class="pchip old-only" data-act="sheet" data-tab="related" aria-label="Related"><svg class="ic s20"><use href="#i-related"/></svg></button>
       <button class="pchip" data-act="saveCurrent"><svg class="ic s20"><use id="plSaveIc" href="#i-save"/></svg><span>Save</span></button>
       <button class="pchip" data-act="dlCurrent" id="plDl"><svg class="ic s20"><use id="plDlIc" href="#i-dl"/></svg><span id="plDlTxt">Download</span></button>
       <button class="pchip" data-act="shareCurrent" aria-label="Share"><svg class="ic s20"><use href="#i-share"/></svg></button>

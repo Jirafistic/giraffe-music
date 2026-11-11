@@ -27,6 +27,22 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* Piezas de una sola interfaz (la nueva o la de siempre). */
+html:not(.ui-new) .new-only, .ui-new .old-only { display: none !important; }
+/* Buscar dentro de una playlist; letra que salta; "Agregar". */
+.plf-hide { display: none !important; }
+body.pl-filtering .hero, body.pl-filtering .hero2, body.pl-filtering .add-row, body.pl-filtering .foot-meta { display: none; }
+body.pl-filtering #page { padding-top: calc(56px + var(--safe-t)); }
+.pl-nf { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.pl-nf .pill .ic { width: 20px; height: 20px; margin: 0; }
+.lyrics.synced p { cursor: pointer; }
+.lyrics.synced p:active { opacity: .7; }
+.add-banner { position: absolute; left: 0; right: 0; top: 100%; display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #1e1e1e; font-size: 14px; }
+.add-banner span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.added .t1::after { content: " ✓"; color: #81c995; }
+.srow { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.srow .grow { flex: 1; min-width: 0; }
+.srow .t2 { white-space: normal; }
 html { background: var(--bg); color-scheme: dark; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);

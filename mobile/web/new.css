@@ -1,0 +1,85 @@
+/* Interfaz nueva de Giraffe Music (como el rediseño de YouTube Music).
+ * Solo se carga si está elegida (Configuración → Información → Interfaz: Nueva);
+ * todo lo que no se cambia acá queda igual que en la interfaz de siempre. */
+
+/* Figtree (licencia OFL, ver fonts/OFL.txt): la más parecida a la letra de YouTube que se
+ * puede incluir. Solo los caracteres latinos (23 KB), dentro de la app. */
+@font-face {
+  font-family: "Figtree";
+  src: url("/fonts/figtree.woff2") format("woff2");
+  font-weight: 300 900;
+  font-display: swap;
+}
+:root {
+  --font: "Figtree", Roboto, -apple-system, system-ui, sans-serif;
+  --nav-h: 64px;
+  --mini-h: 76px;           /* el mini reproductor flota: 64 px + el aire de abajo */
+  --bg2: #121212;
+}
+body { letter-spacing: .005em; }
+
+/* ------------------------------------------------------------- barra de abajo */
+.nav { background: #121212; }
+.nav a { gap: 4px; font-size: 12px; font-weight: 500; }
+.nav a .ic { width: 26px; height: 26px; }
+
+/* ------------------------------------------------------------- mini reproductor: flota, separado */
+.mini {
+  left: 10px; right: 10px; height: 64px;
+  bottom: calc(var(--nav-h) + var(--safe-b) + 6px);
+  border-radius: 14px; padding: 0 4px 0 8px; overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,.45);
+}
+.mini-art { width: 48px; height: 48px; border-radius: 6px; }
+.mini-text { padding: 0 12px 0 14px; }
+.mini-text .t1 { font-size: 15px; line-height: 20px; font-weight: 600; }
+.mini-text .t2 { font-size: 13px; line-height: 18px; }
+.mini-prog { left: 12px; right: 12px; bottom: 0; border-radius: 2px; }
+
+/* ------------------------------------------------------------- arriba: título grande */
+.pg-ttl { margin: 0; font: 700 28px/34px var(--font); letter-spacing: -.01em; white-space: nowrap; }
+.topbar .ttl { font-weight: 600; }
+
+/* ------------------------------------------------------------- chips */
+.chip { border-radius: 10px; height: 36px; padding: 0 14px; font-size: 15px; font-weight: 600; background: #272727; }
+.chip.on { background: #fff; color: #030303; }
+
+/* ------------------------------------------------------------- listas: un poco más amplias */
+.row { min-height: 68px; gap: 18px; padding-top: 6px; padding-bottom: 6px; }
+.row .th { width: 56px; height: 56px; border-radius: 4px; }
+.row .th.wide { width: 99px; height: 56px; }
+.row .t1 { font-size: 16px; line-height: 22px; font-weight: 500; }
+.row .t2 { font-size: 14px; line-height: 20px; }
+.row-more { flex: none; margin-left: -8px; }
+.lib-tools .sort { color: var(--fg2); font-size: 15px; }
+.lib-th-like { background: linear-gradient(135deg, #8e5cff 0%, #ff5fa2 100%) !important; color: #fff; }
+
+/* "Agregar" al principio de tus playlists */
+.add-row { width: 100%; text-align: left; color: var(--fg); }
+.add-th { display: grid; place-items: center; background: #272727 !important; }
+.add-th .ic { width: 30px; height: 30px; }
+
+/* ------------------------------------------------------------- cabecera de playlist / álbum */
+.hero2 { position: relative; isolation: isolate; text-align: center; padding: 0 16px 8px; }
+.h2-art { position: relative; margin: 0 -16px; aspect-ratio: 1; max-height: 64vh; overflow: hidden; background: #181818; }
+.h2-art img, .h2-art .noart { width: 100%; height: 100%; object-fit: cover; display: block; }
+.h2-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(3,3,3,.35) 0%, rgba(3,3,3,0) 22%, rgba(3,3,3,0) 55%, var(--bg) 100%); }
+.h2-ph { display: grid; place-items: center; }
+.h2-ph > * { width: 100%; height: 100%; }
+.hero2 h1 { position: relative; z-index: 1; margin: -30px 0 8px; font: 700 30px/36px var(--font); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.hero2 .desc { font-size: 15px; color: var(--fg2); margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hero2 .meta2 { font-size: 14px; line-height: 20px; color: var(--fg2); }
+.hero2 .meta2 .by, .hero2 .meta2 .by a { color: var(--fg); font-weight: 500; }
+.actions2 { display: flex; align-items: center; gap: 12px; margin: 22px 0 10px; }
+.actions2 .grow { flex: 1; }
+.actions2 .round-btn { width: 52px; height: 52px; background: rgba(255,255,255,.1); }
+.actions2 .h2-shuffle { width: 52px; height: 52px; }
+.actions2 .h2-shuffle .ic { width: 28px; height: 28px; }
+.actions2 .big-play { width: 66px; height: 66px; background: #fff; color: #030303; }
+.actions2 .big-play .ic { width: 34px; height: 34px; }
+
+/* ------------------------------------------------------------- reproductor */
+.pl-title { font-weight: 700; font-size: 26px; line-height: 32px; letter-spacing: -.01em; }
+.pl-artist { font-size: 17px; }
+.pchip, .chip-pair { height: 40px; border-radius: 20px; font-size: 15px; font-weight: 600; }
+.pl-from { font-weight: 500; }

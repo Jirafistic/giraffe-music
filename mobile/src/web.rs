@@ -22,6 +22,9 @@ static FILES: &[(&str, &[u8])] = files![
     "app.css",
     "app.js",
     "i18n.js",
+    "ui.js",
+    "new.css",
+    "fonts/figtree.woff2",
     "sw.js",
     "manifest.webmanifest",
     "icons/icon.svg",
@@ -42,6 +45,7 @@ fn mime(name: &str) -> &'static str {
         "webmanifest" => "application/manifest+json",
         "svg" => "image/svg+xml",
         "png" => "image/png",
+        "woff2" => "font/woff2",
         _ => "application/octet-stream",
     }
 }

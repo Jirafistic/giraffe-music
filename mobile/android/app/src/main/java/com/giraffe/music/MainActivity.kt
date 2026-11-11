@@ -446,6 +446,11 @@ class MainActivity : ComponentActivity() {
             }.start()
         }
 
+        /** Reinicia la app (la pantalla y la interfaz) para cambiar de interfaz. La música no se corta:
+         *  sigue en su servicio. */
+        @JavascriptInterface
+        fun restart() = main.post { recreate() }
+
         /** Escuchar juntos: el lector de QR de Google (abre su propia pantalla de cámara). */
         @JavascriptInterface
         fun scanQr() = main.post {

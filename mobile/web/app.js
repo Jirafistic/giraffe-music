@@ -11,6 +11,8 @@
 'use strict';
 
 const NATIVE = window.GiraffeNative || null;
+/** La interfaz nueva (la decide ui.js antes de dibujar; se cambia en Configuración → Información). */
+const NEWUI = document.documentElement.classList.contains('ui-new');
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => r.querySelectorAll(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -28,7 +30,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('gm.' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('gm.' + k, JSON.stringify(v)); } catch {} },
 };
-const settings = Object.assign({ autoplay: true, skipNonMusic: true, dataSaver: false, libGrid: false, libSort: 'recent', squareThumbs: true, normalize: true, swipeArt: true, wifiOnlyDl: true, qMobile: 'normal', resumeHeadphones: false, lyrRoman: false, lang: 'auto' }, store.get('settings', {}));
+const settings = Object.assign({ autoplay: true, skipNonMusic: true, dataSaver: false, libGrid: false, libSort: 'recent', squareThumbs: true, normalize: true, swipeArt: true, wifiOnlyDl: true, qMobile: 'normal', resumeHeadphones: false, lyrRoman: false, lang: 'auto', ui: 'new' }, store.get('settings', {}));
 const saveSettings = () => store.set('settings', settings);
 let liked = store.get('liked', {});        // id -> {t, at}
 let disliked = store.get('disliked', {});  // id -> 1
@@ -693,13 +695,50 @@ function errorHTML(e) {
 
 // ------------------------------------------------------------------ barra superior
 const $top = $('#top'), $page = $('#page');
-function brandBar(extra = '') {
+function brandBar(extra = '', title = '') {
+  if (NEWUI && title) return `<h1 class="pg-ttl">${esc(T(title))}</h1><div class="grow"></div>${extra}`;
   return `<a class="brand" href="/" aria-label="Giraffe Music"><img src="/icons/icon.svg" alt="" width="26" height="26"><b>Giraffe Music</b></a><div class="grow"></div>${extra}`
     + `<button class="icon-btn" data-act="cast" aria-label="Cast">${ic('cast')}</button><a class="icon-btn" href="/search" aria-label="Search">${ic('search')}</a>${avatarHTML()}`;
 }
-function detailBar(title = '', more = '') {
-  return `<button class="icon-btn" data-act="back" aria-label="Back">${ic('back')}</button><div class="grow ttl">${esc(title)}</div><button class="icon-btn" data-act="cast" aria-label="Cast">${ic('cast')}</button><a class="icon-btn" href="/search" aria-label="Search">${ic('search')}</a>${more}`;
+function detailBar(title = '', more = '', inList = false) {
+  return `<button class="icon-btn" data-act="back" aria-label="Back">${ic('back')}</button><div class="grow ttl">${esc(title)}</div><button class="icon-btn" data-act="cast" aria-label="Cast">${ic('cast')}</button>${inList ? `<button class="icon-btn" data-act="plSearch" aria-label="Search">${ic('search')}</button>` : `<a class="icon-btn" href="/search" aria-label="Search">${ic('search')}</a>`}${more}`;
 }
+/** Buscar dentro de la playlist (o álbum) abierta: filtra sus canciones, sin salir. */
+const fold = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const PLF = {
+  q: '', saved: null,
+  open() {
+    this.saved = { cls: $top.className, html: $top.innerHTML };
+    $top.className = 'sbar psearch'; $top.hidden = false;
+    $top.innerHTML = L(`<button class="icon-btn" data-act="plSearchClose" aria-label="Back">${ic('back')}</button><input id="plq" type="search" enterkeyhint="search" autocomplete="off" placeholder="Search in this playlist"><button class="icon-btn" data-act="plSearchClear" aria-label="Clear" hidden>${ic('close')}</button>`);
+    const inp = $('#plq');
+    inp.oninput = () => { $top.querySelector('[data-act=plSearchClear]').hidden = !inp.value; this.q = inp.value.trim(); this.run(); };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); };
+    inp.focus();
+    document.body.classList.add('pl-filtering');
+  },
+  run() {
+    const q = fold(this.q), rows = $$('#page .tracks .row[data-list]');
+    let n = 0;
+    for (const r of rows) {
+      const t = LISTS.get(r.dataset.list)?.tracks[+r.dataset.i];
+      const ok = !q || (t && fold(`${t.title} ${artists(t)} ${t.album?.name || ''}`).includes(q));
+      r.classList.toggle('plf-hide', !ok);
+      if (ok) n++;
+    }
+    document.body.classList.toggle('pl-filtering', !!q);
+    $('#plNotFound')?.remove();
+    if (q && !n) $('#page .tracks')?.insertAdjacentHTML('afterend', L(`<div class="empty pl-nf" id="plNotFound"><h3>${esc(T(`Not in this playlist: “${this.q}”`))}</h3><span>Search for it in all of Giraffe Music?</span><button class="pill solid" data-act="plSearchAll">${ic('search', 's20')}Search</button></div>`));
+    if (q) window.scrollTo(0, 0);
+  },
+  close() {
+    this.q = '';
+    for (const r of $$('#page .plf-hide')) r.classList.remove('plf-hide');
+    $('#plNotFound')?.remove();
+    document.body.classList.remove('pl-filtering');
+    if (this.saved) { $top.className = this.saved.cls; $top.innerHTML = this.saved.html; this.saved = null; }
+  },
+};
 let topObs = null;
 function setTop(html, cls = '') {
   $top.className = 'topbar ' + cls;
@@ -738,13 +777,18 @@ async function render(y = 0) {
   rendered = location.pathname + location.search;
   cleanup?.(); cleanup = null;
   LISTS.clear();
+  PLF.q = ''; PLF.saved = null; document.body.classList.remove('pl-filtering');
+  if (addTarget && location.pathname !== '/search') {
+    mem.delete('/api/playlist/' + encodeURIComponent(addTarget.id)); mem.delete('/api/me/library');
+    addTarget = null;
+  }
   const [re, fn, t] = routes.find(([r]) => r.test(location.pathname)) || routes[0];
   if (t) tab = t;
   document.body.classList.toggle('modal', location.pathname === '/account');
   for (const a of $$('#nav a')) {
     const on = a.dataset.tab === tab;
     a.classList.toggle('on', on);
-    a.querySelector('use').setAttribute('href', `#i-${a.dataset.tab}${on ? '-f' : ''}`);
+    a.querySelector('use').setAttribute('href', `#i-${(NEWUI && NAV_NEW[a.dataset.tab]) || a.dataset.tab}${on ? '-f' : ''}`);
   }
   $page.innerHTML = loadingHTML();
   try {
@@ -916,18 +960,21 @@ async function pageExploreSub(m) {
 }
 
 async function pageLibrary() {
-  setTop(brandBar(`<a class="icon-btn" href="/history" aria-label="History">${ic('history')}</a>`));
+  setTop(brandBar(`<a class="icon-btn" href="/history" aria-label="History">${ic('history')}</a>`, 'Library'));
   const f = new URLSearchParams(location.search).get('f') || '';
   if (!DL.loaded) { DL.loaded = true; await DL.refresh(); }
-  const chips = [['playlists', 'Playlists'], ['songs', 'Songs'], ['albums', 'Albums'], ['artists', 'Artists'], ['downloads', 'Downloads']];
+  const chips = NEWUI ? [['downloads', 'Downloads'], ['playlists', 'Playlists'], ['songs', 'Songs'], ['albums', 'Albums'], ['artists', 'Artists']]
+    : [['playlists', 'Playlists'], ['songs', 'Songs'], ['albums', 'Albums'], ['artists', 'Artists'], ['downloads', 'Downloads']];
+  // Interfaz nueva: el ⋮ al costado de cada playlist o álbum, como en YouTube Music.
+  const more = (kind, id, title) => NEWUI && kind !== 'artist' ? `<button class="icon-btn row-more" data-act="libItemMenu" data-kind="${kind}" data-id="${esc(id)}" data-title="${esc(title)}" aria-label="More">${ic('more')}</button>` : '';
   let html = `<div class="chips">${chips.map(([k, n]) => `<button class="chip${f === k ? ' on' : ''}" data-act="libChip" data-f="${k}">${n}</button>`).join('')}</div>`;
   const SORTS = { recent: 'Recent activity', added: 'Recently added', az: 'A–Z' };
   html += `<div class="lib-tools"><div class="grow"><button class="sort" data-act="libSort">${SORTS[settings.libSort] || SORTS.recent} ${ic('down', 's20')}</button></div>`
     + `<button class="icon-btn" data-act="libView" aria-label="${settings.libGrid ? 'List view' : 'Grid view'}">${ic(settings.libGrid ? 'list' : 'grid')}</button></div>`;
   const nLiked = Object.keys(liked).length, nDl = DL.items.size;
   const fixed = [];
-  if (!f || f === 'playlists') fixed.push(`<a class="row" href="/liked"><div class="th lib-th-like">${ic('like-f')}</div><div class="tx"><div class="t1">Liked Music</div><div class="t2">${ic('pin', 's16')}<span>Auto playlist${me.signedIn ? '' : ' • ' + songs(nLiked)}</span></div></div></a>`);
-  if (!f || f === 'downloads') fixed.push(`<a class="row" href="/downloads"><div class="th lib-th-dl">${ic('dl-done')}</div><div class="tx"><div class="t1">Downloads</div><div class="t2"><span>${songs(nDl)} • ${fmtMB(DL.bytes)}</span></div></div></a>`);
+  if (!f || f === 'playlists') fixed.push(`<a class="row" href="/liked"><div class="th lib-th-like">${ic('like-f')}</div><div class="tx"><div class="t1">Liked Music</div><div class="t2">${ic('pin', 's16')}<span>Auto playlist${me.signedIn ? '' : ' • ' + songs(nLiked)}</span></div></div>${more('liked', 'LM', 'Liked Music')}</a>`);
+  if ((!f && !NEWUI) || f === 'downloads') fixed.push(`<a class="row" href="/downloads"><div class="th lib-th-dl">${ic('dl-done')}</div><div class="tx"><div class="t1">Downloads</div><div class="t2"><span>${songs(nDl)} • ${fmtMB(DL.bytes)}</span></div></div></a>`);
   if (f === 'songs') {
     const songs = Object.values(savedSongs).concat(Object.values(liked)).sort((a, b) => b.at - a.at).map((x) => x.t);
     const uniq = [...new Map(songs.map((t) => [t.id, t])).values()];
@@ -960,14 +1007,41 @@ async function pageLibrary() {
     if (!f || f === 'downloads') fixedCards.push(`<a class="card" href="/downloads"><div class="art"><div class="lib-th-dl">${ic('dl-done')}</div></div><div class="t1">Downloads</div><div class="t2">${songs(nDl)}</div></a>`);
     html += `<div class="lib-grid">${fixedCards.join('')}${items.map((x) => `<a class="card${x.round ? ' round' : ''}" href="/${x.kind}/${encodeURIComponent(x.id)}"><div class="art">${thumbImg(x.thumb, 180)}</div><div class="t1">${esc(x.title)}</div><div class="t2">${esc(x.subtitle)}</div></a>`).join('')}</div>`;
   } else {
-    html += fixed.join('') + items.map((x) => `<a class="row${x.round ? ' round' : ''}" href="/${x.kind}/${encodeURIComponent(x.id)}"><div class="th">${thumbImg(x.thumb)}</div><div class="tx"><div class="t1">${esc(x.title)}</div><div class="t2"><span>${esc(x.subtitle)}</span></div></div></a>`).join('');
+    html += fixed.join('') + items.map((x) => `<a class="row${x.round ? ' round' : ''}" href="/${x.kind}/${encodeURIComponent(x.id)}"><div class="th">${thumbImg(x.thumb)}</div><div class="tx"><div class="t1">${esc(x.title)}</div><div class="t2"><span>${esc(x.subtitle)}</span></div></div>${more(x.kind, x.id, x.title)}</a>`).join('');
   }
   html += `<div class="fabs"><button class="fab-mini" data-act="together" aria-label="Listen together">${ic('person-add')}</button><button class="fab" data-act="newPlaylist">${ic('add')}New</button></div>`;
   if (f === 'downloads') return html + listHTML([...DL.items.values()].map((x) => x.track), 'Downloads', { sub: 'dur' });
   if (!fixed.length && !items.length) html += `<div class="empty"><h3>Nothing here yet</h3>Save albums, playlists and artists to find them fast.</div>`;
   return html;
 }
-function collHero({ title, thumb, by, meta, desc, k, thumbHTML, save }) {
+/** La carátula en grande (para la cabecera de la interfaz nueva). */
+function hiRes(u) {
+  if (!u) return u;
+  if (/=w\d+-h\d+/.test(u)) return u.replace(/=w\d+-h\d+[^&]*$/, '=w720-h720-l90-rj');
+  if (/=s\d+/.test(u)) return u.replace(/=s\d+[^&]*$/, '=s720');
+  return u;
+}
+function collHero(o) {
+  return NEWUI ? collHeroNew(o) : collHeroOld(o);
+}
+/** Interfaz nueva: la carátula ocupa todo el ancho y se funde con el fondo, el título centrado
+ *  y las acciones abajo (descargar, guardar/editar, compartir… aleatorio y reproducir). */
+function collHeroNew({ title, thumb, by, meta, desc, k, thumbHTML, save }) {
+  afterRender = null;
+  const art = thumbHTML ? `<div class="h2-art h2-ph">${thumbHTML}</div>` : `<div class="h2-art">${thumb ? `<img src="${esc(fixUrl(hiRes(thumb)))}" alt="" decoding="async">` : NOART}</div>`;
+  return `<div class="top-sentinel" style="position:absolute;top:160px;height:1px;width:1px"></div><div class="hero2">${art}
+    <h1>${esc(title)}</h1>${desc ? `<div class="desc">${esc(desc)}</div>` : ''}
+    <div class="meta2">${by ? `<span class="by">${by}</span> • ` : ''}${meta}</div>
+    <div class="actions2">
+      <button class="round-btn" data-act="dlAll" data-list="${k}" data-dlall="${k}" aria-label="Download"></button>
+      ${save ?? ''}
+      <button class="round-btn" data-act="shareList" data-list="${k}" aria-label="Share">${ic('share')}</button>
+      <div class="grow"></div>
+      <button class="icon-btn h2-shuffle" data-act="shuffleList" data-list="${k}" aria-label="Shuffle">${ic('shuffle')}</button>
+      <button class="big-play" data-act="playAll" data-list="${k}" aria-label="Play">${ic('play')}</button>
+    </div></div>`;
+}
+function collHeroOld({ title, thumb, by, meta, desc, k, thumbHTML, save }) {
   afterRender = async () => { const c = await colorOf(thumb); const h = $('.hero'); if (c && h) h.style.setProperty('--hero', tone(c, 30)); };
   return `<div class="top-sentinel" style="position:absolute;top:120px;height:1px;width:1px"></div><div class="hero">
     <div class="cover">${thumbHTML || thumbImg(thumb, 260)}</div>
@@ -980,8 +1054,11 @@ function collHero({ title, thumb, by, meta, desc, k, thumbHTML, save }) {
       <button class="round-btn" data-act="listMenu" data-list="${k}" aria-label="More">${ic('more')}</button>
     </div></div>`;
 }
+const NAV_NEW = { samples: 'samples2', library: 'bookmark' };
+let addTarget = null; // "Agregar": la playlist a la que se suman canciones desde la búsqueda
+const addRow = (id, title) => NEWUI ? `<button class="row add-row" data-act="plAdd" data-id="${esc(id)}" data-title="${esc(title)}"><div class="th add-th">${ic('add')}</div><div class="tx"><div class="t1">Add</div></div></button>` : '';
 async function pageCollection(id, isAlbum) {
-  setTop(detailBar(''), 'clear');
+  setTop(detailBar('', '', true), 'clear');
   if (!isAlbum && isLocalPl(id)) return pageLocalPlaylist(id);
   const c = await api(`/api/${isAlbum ? 'album' : 'playlist'}/${encodeURIComponent(id)}`, 60 * 60e3);
   $top.querySelector('.ttl').textContent = c.title;
@@ -997,10 +1074,10 @@ async function pageCollection(id, isAlbum) {
   setTimeout(dlUI);
   const after = afterRender;
   afterRender = () => { after?.(); loadRest(c, k, isAlbum ? { sub: 'none' } : { sub: 'album' }, isAlbum); };
-  return hero + `<div class="tracks">${rows}</div><div class="foot-meta">${songs(c.tracks.length)} • ${fmtLong(c.duration)}</div>`;
+  return hero + (c.owned && me.signedIn && !isAlbum ? addRow(id, c.title) : '') + `<div class="tracks">${rows}</div><div class="foot-meta">${songs(c.tracks.length)} • ${fmtLong(c.duration)}</div>`;
 }
 async function pageLiked() {
-  setTop(detailBar('Liked Music'), 'clear');
+  setTop(detailBar('Liked Music', '', true), 'clear');
   let tracks = Object.values(liked).sort((a, b) => b.at - a.at).map((x) => x.t);
   let acc = null;
   if (me.signedIn) {
@@ -1024,7 +1101,7 @@ async function pageLiked() {
     + (tracks.length ? `<div class="tracks">${tracks.map((t, i) => rowHTML(t, k, i)).join('')}</div>` : `<div class="empty">Songs you like will show up here.</div>`);
 }
 async function pageDownloads() {
-  setTop(detailBar('Downloads'), 'clear');
+  setTop(detailBar('Downloads', '', true), 'clear');
   if (!DL.loaded) { DL.loaded = true; await DL.refresh(); }
   const tracks = [...DL.items.values()].map((x) => x.track);
   const busy = Object.keys(DL.active).length;
@@ -1073,6 +1150,7 @@ async function pageSearch(_, my) {
   const q = sp.get('q') || '', f = sp.get('f') || '', scope = sp.get('s') || '';
   $top.className = 'sbar'; $top.hidden = false;
   $top.innerHTML = L(`<button class="icon-btn" data-act="back" aria-label="Back">${ic('back')}</button><input id="sq" type="search" enterkeyhint="search" autocomplete="off" placeholder="Search songs, artists, albums" value="${esc(q)}"><button class="icon-btn" data-act="clearSearch" aria-label="Clear"${q ? '' : ' hidden'}>${ic('close')}</button><button class="icon-btn" aria-label="Voice">${ic('mic')}</button>`);
+  if (addTarget) $top.insertAdjacentHTML('beforeend', L(`<div class="add-banner"><span>${esc(T(`Adding to “${addTarget.title}”`))}</span><button class="pill" data-act="addDone">Done</button></div>`));
   const input = $('#sq');
   let deb = 0;
   input.oninput = () => { clearTimeout(deb); $top.querySelector('[data-act=clearSearch]').hidden = !input.value; deb = setTimeout(() => suggest(input.value), 220); };
@@ -1158,7 +1236,7 @@ function pageLocalPlaylist(id) {
   const save = `<a class="round-btn" href="/playlist/${encodeURIComponent(id)}/edit" aria-label="Edit">${ic('edit')}</a>`;
   setTimeout(dlUI);
   return collHero({ title: p.title, thumb: p.tracks[0]?.thumb, meta: `${T('Saved on this device')} • ${songs(p.tracks.length)}${dur ? ' • ' + fmtLong(dur) : ''}`, desc: p.description, k, save })
-    + (p.tracks.length ? `<div class="tracks">${p.tracks.map((t, i) => rowHTML(t, k, i, { sub: 'album' })).join('')}</div>` : `<div class="empty">${T('Songs you like or save show up here.')}</div>`);
+    + addRow(id, p.title) + (p.tracks.length ? `<div class="tracks">${p.tracks.map((t, i) => rowHTML(t, k, i, { sub: 'album' })).join('')}</div>` : `<div class="empty">${T('Songs you like or save show up here.')}</div>`);
 }
 function editHTML(id, c) {
   setTop(`<button class="icon-btn" data-act="back" aria-label="Back">${ic('back')}</button><div class="grow"></div><button class="done-btn" data-act="edSave">Done</button>`);
@@ -1254,7 +1332,9 @@ async function pageSettings(section) {
   if (section === 'transfer') { afterRender = () => watchTransfer(); return transferHTML(); }
   let st = {};
   try { st = await api('/api/status', 0); } catch {}
+  const uiNow = settings.ui === 'old' ? 'old' : 'new';
   return row(`Giraffe Music ${esc(st.version || '')}${st.demo ? ' (demo)' : ''}`, 'No ads, ever. Built on the ytm-rs core (GPL-3.0).', '')
+    + `<div class="srow ui-pick"><div class="grow"><div class="t1">Interface</div><div class="t2">${T(uiNow === 'new' ? 'New: like the latest YouTube Music' : 'Old: the classic Giraffe Music')}</div></div><div class="tg-role"><button class="${uiNow === 'old' ? 'on' : ''}" data-act="setUi" data-v="old">${T('Old')}</button><button class="${uiNow === 'new' ? 'on' : ''}" data-act="setUi" data-v="new">${T('New')}</button></div></div>`
     + row('Battery', NATIVE ? 'Native player with audio offload, a 256 MB audio cache and nothing running in the background.' : 'Web player', '')
     + (NATIVE ? row('Check for updates', `Version ${esc(NATIVE.appVersion?.() || '')}`, 'data-act="checkUpdate"') : '')
     + row('Source code', 'github.com/grapedjuice/ytm-rs', 'data-act="openUrl" data-url="https://github.com/grapedjuice/ytm-rs"');
@@ -1309,7 +1389,7 @@ async function openSheet(tabName, refresh) {
     if (lyr.synced) {
       const lines = parseLrc(lyr.synced);
       lyr.lines = lines;
-      body.innerHTML = `<div class="lyrics synced"><p class="gap">♪</p>${lines.map((l, i) => `<p data-i="${i}"${l.text ? '' : ' class="gap"'}>${esc(l.text || '♪')}${romanLine(l.text)}</p>`).join('')}<div class="src">${T('Lyrics from LRCLIB')}</div></div>`;
+      body.innerHTML = `<div class="lyrics synced"><p class="gap">♪</p>${lines.map((l, i) => `<p data-i="${i}" data-act="lyrSeek"${l.text ? '' : ' class="gap"'}>${esc(l.text || '♪')}${romanLine(l.text)}</p>`).join('')}<div class="src">${T('Lyrics from LRCLIB')}</div></div>`;
       tick();
     } else if (lyr.plain) {
       body.innerHTML = `<div class="lyrics">${lyr.plain.split('\n').map((l) => `<p>${esc(l) || '&nbsp;'}${romanLine(l)}</p>`).join('')}<div class="src">${T('Lyrics from LRCLIB')}</div></div>`;
@@ -1575,6 +1655,20 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && TG
 // ------------------------------------------------------------------ novedades (después de actualizar)
 // Una tarjeta por novedad, contadas como para cualquier persona. Se ven una sola vez.
 const CHANGES = {
+  '0.5.0': [
+    ['spark', 'A fresh new look', 'Una interfaz nueva',
+      'Giraffe looks like the latest YouTube Music: big covers, a floating mini player and roomier lists. Prefer the classic one? Settings → About → Interface.',
+      'Giraffe se ve como el último YouTube Music: carátulas grandes, mini reproductor flotante y listas más amplias. ¿Preferís la clásica? Configuración → Información → Interfaz.'],
+    ['search', 'Search inside a playlist', 'Busca dentro de una playlist',
+      'Tap the magnifier in a playlist or album to find a song in it. Not there? Search everywhere with one tap.',
+      'Toca la lupa dentro de una playlist o álbum para encontrar una canción. ¿No está? Búscala en todos lados con un toque.'],
+    ['quote', 'Jump to a lyric', 'Salta a una parte de la letra',
+      'Tap any line of the lyrics and the song jumps right there.',
+      'Toca cualquier verso de la letra y la canción salta justo ahí.'],
+    ['add', 'Add songs to your playlists', 'Agrega canciones a tus playlists',
+      'Use “Add” at the top of your playlists to search and add songs without leaving.',
+      'Usa “Agregar” arriba de tus playlists para buscar y sumar canciones sin salir.'],
+  ],
   '0.4.0': [
     ['person-add', 'Listen together', 'Escuchar juntos',
       'Tap the person icon in Library and listen to the same music at the same time with up to 3 friends on your Wi-Fi.',
@@ -1608,7 +1702,7 @@ function whatsNew() {
   store.set('seenVersion', mine);
   // Instalación nueva (sin nada guardado de antes): no hay "novedades" que contar.
   if (!mine || seenV === mine || (seenV === null && !localStorage.getItem('gm.session') && !localStorage.getItem('gm.history'))) return;
-  const cards = Object.entries(CHANGES).filter(([v]) => newer(v, seenV || '0.3.2') && !newer(v, mine)).flatMap(([, c]) => c);
+  const cards = Object.entries(CHANGES).filter(([v]) => newer(v, seenV || '0.4.0') && !newer(v, mine)).flatMap(([, c]) => c);
   if (!cards.length) return;
   let i = 0;
   const es = LANG === 'es';
@@ -1724,6 +1818,8 @@ function openMenu(head, items, ctx) {
   pushOv('menu');
 }
 const MENU = {
+  mShareUrl: ({ name, url }) => share(name, url),
+  mDelLocal: ({ id }) => { ACT.delLocalPl({ dataset: { id } }); },
   mRadio: ({ t }) => P.radio(t),
   mNext: ({ t, tracks }) => P.playNext(tracks || [t]),
   mQueue: ({ t, tracks }) => P.addQueue(tracks || [t]),
@@ -1831,6 +1927,10 @@ const ACT = {
     const l = LISTS.get(el.dataset.list), i = +el.dataset.i;
     if (!l) return;
     const t = l.tracks[i];
+    if (addTarget && location.pathname === '/search' && el.closest('#page')) {
+      el.classList.add('added');
+      return addToPlaylist(addTarget.id, { tracks: [t] });
+    }
     if (cur()?.id === t.id && el.closest('#qList') == null && el.closest('.smp') == null) return openPlayer();
     if (el.closest('#qList')) return P.eng.skipTo(i);
     if (l.mode === 'radio') P.radio(t, l.name ? `${l.name}` : undefined);
@@ -1946,6 +2046,41 @@ const ACT = {
   tgScan: () => { if (NATIVE?.scanQr) NATIVE.scanQr(); else toast('Enter code'); },
   tgJoin: () => TG.join($('#tgCode').value),
   tgLeave: () => TG.leave(),
+  setUi: (el) => {
+    if ((settings.ui === 'old' ? 'old' : 'new') === el.dataset.v) return;
+    settings.ui = el.dataset.v; saveSettings();
+    toast('Restarting…');
+    // La app se reinicia sola (la música sigue sonando): así solo se carga la interfaz elegida.
+    setTimeout(() => (NATIVE?.restart ? NATIVE.restart() : location.reload()), 400);
+  },
+  lyrSeek: (el) => {
+    const l = lyr?.lines?.[+el.dataset.i];
+    if (!l || !cur()) return;
+    if (TG.send({ kind: 'seek', pos: l.t })) return;
+    P.eng.seek(l.t);
+    if (!P.playing) P.eng.play();
+  },
+  plSearch: () => PLF.open(),
+  plSearchClose: () => PLF.close(),
+  plSearchClear: () => { const i = $('#plq'); i.value = ''; i.oninput(); i.focus(); },
+  plSearchAll: () => { const q = PLF.q; PLF.close(); go('/search?q=' + encodeURIComponent(q)); },
+  plAdd: (el) => { addTarget = { id: el.dataset.id, title: el.dataset.title }; go('/search'); },
+  addDone: () => history.back(),
+  libItemMenu: async (el, e) => {
+    e?.preventDefault(); e?.stopPropagation();
+    const { kind, id, title } = el.dataset;
+    let tracks = [];
+    try {
+      if (kind === 'liked') tracks = me.signedIn ? (await api('/api/me/liked', 60e3)).tracks || [] : Object.values(liked).sort((a, b) => b.at - a.at).map((x) => x.t);
+      else if (isLocalPl(id)) tracks = localPl(id)?.tracks || [];
+      else tracks = (await api(`/api/${kind}/${encodeURIComponent(id)}`, 60 * 60e3)).tracks || [];
+    } catch {}
+    const url = kind === 'album' ? `https://music.youtube.com/browse/${id}` : `https://music.youtube.com/playlist?list=${String(id).replace(/^VL/, '')}`;
+    const items = tracks.length ? [['shuffle', 'Shuffle play', 'mShuffle'], ['playnext', 'Play next', 'mNext'], ['queue', 'Add to queue', 'mQueue'], ['dl', 'Download', 'mDlAll']] : [];
+    if (!isLocalPl(id) && kind !== 'liked') items.push(['share', 'Share', 'mShareUrl']);
+    if (isLocalPl(id)) items.push(['delete', 'Delete playlist', 'mDelLocal']);
+    openMenu(`<div class="m-head"><div class="tx"><div class="t1">${esc(T(title))}</div><div class="t2"><span>${tracks.length ? songs(tracks.length) : ''}</span></div></div></div>`, items, { tracks, name: title, url, id });
+  },
   tgPeople: () => { TG.view = 'people'; TG.render(); },
   tgRole: async (el) => {
     const r = await fetch('/api/together/role', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ member: el.dataset.m, control: el.dataset.c === '1' }) }).catch(() => null);
@@ -2224,6 +2359,7 @@ async function loadRest(c, k, opts, numbered) {
     c.continuation = page.continuation;
     if (list && list.tracks !== c.tracks) list.tracks.push(...add);
     $('.tracks')?.insertAdjacentHTML('beforeend', add.map((t, j) => rowHTML(t, k, start + j, numbered ? { num: start + j + 1, sub: 'none' } : opts)).join(''));
+    if (PLF.q) PLF.run();
     const foot = $('.foot-meta');
     if (foot) foot.textContent = T(`${songs(c.tracks.length)} • ${fmtLong(c.duration)}`);
     if (!add.length) break;
