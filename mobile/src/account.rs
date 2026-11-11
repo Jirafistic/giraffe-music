@@ -37,6 +37,7 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/me/forget", post(forget))
         .route("/api/me/playlist/{id}/edit", post(edit_playlist))
         .route("/api/me/playlist/{id}/remove", post(remove_from_playlist))
+        .route("/api/me/playlist/{id}", axum::routing::delete(delete_playlist))
 }
 
 fn err(e: anyhow::Error) -> Response {
@@ -289,6 +290,20 @@ async fn edit_playlist(State(app): S, Path(id): Path<String>, Json(b): Json<Edit
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "The title can't be empty"}))).into_response();
     }
     match ytm::edit_playlist(&app.api, &id, title.trim(), &description, privacy(&b.privacy)).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+/// Borra una playlist tuya (también en YouTube).
+async fn delete_playlist(State(app): S, Path(id): Path<String>) -> Response {
+    if let Some(r) = need_auth(&app) {
+        return r;
+    }
+    if app.demo {
+        return Json(json!({"ok": true})).into_response();
+    }
+    match ytm::delete_playlist(&app.api, &id).await {
         Ok(()) => Json(json!({"ok": true})).into_response(),
         Err(e) => err(e),
     }

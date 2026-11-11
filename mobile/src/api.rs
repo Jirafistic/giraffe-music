@@ -305,7 +305,9 @@ async fn playlist(State(app): AppState, Path(id): Path<String>) -> R {
     let mut v = collection(&c);
     v["continuation"] = json!(token.filter(|_| c.tracks.len() < limit));
     v["limit"] = json!(limit);
-    Ok(cached(v, 600))
+    // Las playlists tuyas cambian (agregar, quitar, editar): siempre frescas.
+    let secs = if v["owned"].as_bool() == Some(true) { 0 } else { 600 };
+    Ok(cached(v, secs))
 }
 
 /// La página siguiente de una playlist.
@@ -608,13 +610,134 @@ pub(crate) async fn resolve(app: &App, id: &str, fresh: bool) -> anyhow::Result<
             Some((v, "high")) => (v, &[251, 140, 139]),
             _ => (id.split('@').next().unwrap_or(id), &[140, 139]),
         };
-        let s = innertube::audio_stream_itags(&proxy::http(), vid, &visitor, itags).await?;
-        Resolved { url: s.url, size: s.size, mime: if s.opus { "audio/webm" } else { "audio/mp4" }, loudness: s.loudness_db }
+        match innertube::audio_stream_itags(&proxy::http(), vid, &visitor, itags).await {
+            Ok(s) => Resolved { url: s.url, size: s.size, mime: if s.opus { "audio/webm" } else { "audio/mp4" }, loudness: s.loudness_db },
+            // Algunas canciones que sí están (sobre todo de sellos grandes) no vienen en los
+            // formatos de siempre por ese camino: se prueba con otro cliente y cualquier audio.
+            Err(e) => {
+                log::warn!("audio de {vid} (visionOS): {e:#}; probando otros caminos");
+                match audio_fallback(vid, &visitor, itags).await {
+                    Ok(r) => r,
+                    Err(e2) => {
+                        log::warn!("audio de {vid} (otros caminos): {e2:#}");
+                        return Err(e);
+                    }
+                }
+            }
+        }
     };
     let mut map = app.streams.0.lock().unwrap();
     map.retain(|_, (_, at)| at.elapsed() < STREAM_TTL);
     map.insert(id.to_owned(), (r.clone(), Instant::now()));
     Ok(r)
+}
+
+/// El segundo intento para el audio de una canción: el cliente de Android VR (no pide
+/// sesión ni token) y después visionOS otra vez, aceptando cualquier formato de audio.
+async fn audio_fallback(vid: &str, visitor: &str, prefer: &[u64]) -> anyhow::Result<Resolved> {
+    let mut last = anyhow::anyhow!("sin audio");
+    for client in [Client::AndroidVr, Client::VisionOs] {
+        match player_with(client, vid, visitor).await {
+            Ok(resp) => match pick_any_audio(&resp, prefer).await {
+                Ok(r) => {
+                    log::info!("audio de {vid}: {} ({})", client.name(), r.mime);
+                    return Ok(r);
+                }
+                Err(e) => last = e,
+            },
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+#[derive(Clone, Copy)]
+enum Client {
+    AndroidVr,
+    VisionOs,
+}
+
+impl Client {
+    fn name(self) -> &'static str {
+        match self {
+            Client::AndroidVr => "ANDROID_VR",
+            Client::VisionOs => "VISIONOS",
+        }
+    }
+}
+
+async fn player_with(client: Client, vid: &str, visitor: &str) -> anyhow::Result<Value> {
+    const VR: &str = "1.73.21";
+    let (ctx, url, ua, name, version) = match client {
+        Client::AndroidVr => (
+            json!({"clientName": "ANDROID_VR", "clientVersion": VR, "deviceMake": "Pico", "deviceModel": "A8110", "osName": "Android", "osVersion": "10", "androidSdkVersion": 29, "hl": "en", "gl": "US", "visitorData": visitor}),
+            "https://youtubei.googleapis.com/youtubei/v1/player?prettyPrint=false",
+            format!("com.google.android.apps.youtube.vr.pico/{VR} (Linux; U; Android 10; A8110 Build/QKQ1) gzip"),
+            "28",
+            VR,
+        ),
+        Client::VisionOs => (
+            json!({"clientName": "VISIONOS", "clientVersion": "1.02", "deviceMake": "Apple", "deviceModel": "RealityDevice17,1", "userAgent": innertube::UA, "osName": "visionOS", "osVersion": "26.5.23O471", "hl": "en", "gl": "US", "visitorData": visitor}),
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+            innertube::UA.to_owned(),
+            "101",
+            "1.02",
+        ),
+    };
+    let resp: Value = proxy::http()
+        .post(url)
+        .header("User-Agent", ua)
+        .header("X-YouTube-Client-Name", name)
+        .header("X-YouTube-Client-Version", version)
+        .header("X-Goog-Visitor-Id", visitor)
+        .timeout(Duration::from_secs(10))
+        .json(&json!({"context": {"client": ctx}, "videoId": vid, "contentCheckOk": true, "racyCheckOk": true}))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let st = &resp["playabilityStatus"];
+    anyhow::ensure!(st["status"] == "OK", "{}: {}", st["status"].as_str().unwrap_or("UNPLAYABLE"), st["reason"].as_str().unwrap_or("sin motivo"));
+    Ok(resp)
+}
+
+/// Cualquier audio con dirección directa: primero los preferidos, después AAC (el teléfono
+/// lo decodifica por hardware) y por último Opus, del mejor al peor.
+async fn pick_any_audio(resp: &Value, prefer: &[u64]) -> anyhow::Result<Resolved> {
+    let formats: Vec<&Value> = resp["streamingData"]["adaptiveFormats"]
+        .as_array()
+        .map(|a| a.iter().filter(|f| f["mimeType"].as_str().is_some_and(|m| m.starts_with("audio/")) && f["url"].is_string()).collect())
+        .unwrap_or_default();
+    let rank = |f: &Value| {
+        let itag = f["itag"].as_u64().unwrap_or(0);
+        let pref = prefer.iter().position(|p| *p == itag).map_or(100, |i| i as u64);
+        let aac = f["mimeType"].as_str().is_some_and(|m| m.starts_with("audio/mp4"));
+        (pref, !aac, u64::MAX - f["bitrate"].as_u64().unwrap_or(0))
+    };
+    let mut sorted = formats.clone();
+    sorted.sort_by_key(|f| rank(f));
+    for f in sorted {
+        let url = f["url"].as_str().unwrap_or_default().to_owned();
+        let size = match f["contentLength"].as_str().and_then(|s| s.parse::<u64>().ok()) {
+            Some(n) => Some(n),
+            None => url::Url::parse(&url).ok().and_then(|u| u.query_pairs().find(|(k, _)| k == "clen").and_then(|(_, v)| v.parse().ok())),
+        };
+        // Sin tamaño en la respuesta: se le pregunta al servidor del audio.
+        let size = match size {
+            Some(n) => n,
+            None => match proxy::http().head(&url).header("User-Agent", innertube::UA).timeout(Duration::from_secs(8)).send().await {
+                Ok(r) if r.status().is_success() => match r.content_length() {
+                    Some(n) if n > 0 => n,
+                    _ => continue,
+                },
+                _ => continue,
+            },
+        };
+        let mime = if f["mimeType"].as_str().is_some_and(|m| m.starts_with("audio/mp4")) { "audio/mp4" } else { "audio/webm" };
+        return Ok(Resolved { url, size, mime, loudness: innertube::loudness(resp, f) });
+    }
+    anyhow::bail!("no audio stream in fallback player response")
 }
 
 /// `bytes=a-b` / `bytes=a-` → (a, b) dentro de `size`.

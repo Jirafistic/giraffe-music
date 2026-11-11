@@ -60,6 +60,13 @@ async function api(path, ttl = 5 * 60e3) {
   if (mem.size > 80) mem.delete(mem.keys().next().value);
   return v;
 }
+/** Playlists que cambiaron (agregar, quitar, editar): la próxima vez se piden de nuevo,
+ *  sin usar lo guardado. */
+const plFresh = {};
+function plChanged(id) {
+  plFresh[id] = Date.now();
+  for (const k of [...mem.keys()]) if (k.includes(encodeURIComponent(id)) || k === '/api/me/library') mem.delete(k);
+}
 const imgUrl = (u) => !u ? '' : u.startsWith('/') ? u : '/api/img?u=' + encodeURIComponent(u);
 
 // ------------------------------------------------------------------ descargas (las guarda el núcleo nativo)
@@ -821,7 +828,7 @@ async function render(y = 0) {
   LISTS.clear();
   PLF.q = ''; PLF.saved = null; document.body.classList.remove('pl-filtering');
   if (addTarget && location.pathname !== '/search') {
-    mem.delete('/api/playlist/' + encodeURIComponent(addTarget.id)); mem.delete('/api/me/library');
+    plChanged(addTarget.id);
     addTarget = null;
   }
   const [re, fn, t] = routes.find(([r]) => r.test(location.pathname)) || routes[0];
@@ -1107,7 +1114,7 @@ const addRow = (id, title) => NEWUI ? `<button class="row add-row" data-act="plA
 async function pageCollection(id, isAlbum) {
   setTop(detailBar('', '', true), 'clear');
   if (!isAlbum && isLocalPl(id)) return pageLocalPlaylist(id);
-  const c = await api(`/api/${isAlbum ? 'album' : 'playlist'}/${encodeURIComponent(id)}`, 60 * 60e3);
+  const c = await api(`/api/${isAlbum ? 'album' : 'playlist'}/${encodeURIComponent(id)}${plFresh[id] ? '?v=' + plFresh[id] : ''}`, 60 * 60e3);
   $top.querySelector('.ttl').textContent = c.title;
   const k = reg(c.tracks, c.title);
   if (c.owned && !isAlbum) LISTS.get(k).playlistId = id;
@@ -1298,7 +1305,7 @@ function editHTML(id, c) {
   return `<div id="edForm" data-id="${esc(id)}"><div class="ed-cover">${thumbImg(c.thumb, 200)}</div><div class="ed">
     <div class="ed-f"><label>Title</label><input id="edTitle" maxlength="150" value="${esc(c.title)}"><div class="cnt" id="edTitleN"></div></div>
     <div class="ed-f"><label>Description (optional)</label><textarea id="edDesc" rows="1" maxlength="5000">${esc(c.description || '')}</textarea><div class="cnt" id="edDescN"></div></div>
-    ${c.local ? `<div class="ed-row" data-act="delLocalPl" data-id="${esc(id)}">${ic('delete')}<span>Delete playlist</span></div>` : ''}<div class="ed-row"${c.local ? ' hidden' : ''}>${ic('globe')}<select id="edPrivacy"><option value="">Keep current visibility</option><option value="PUBLIC">Public</option><option value="UNLISTED">Unlisted</option><option value="PRIVATE">Private</option></select>${ic('down')}</div>
+    <div class="ed-row" data-act="${c.local ? 'delLocalPl' : 'delPl'}" data-id="${esc(id)}" data-title="${esc(c.title)}">${ic('delete')}<span>Delete playlist</span></div><div class="ed-row"${c.local ? ' hidden' : ''}>${ic('globe')}<select id="edPrivacy"><option value="">Keep current visibility</option><option value="PUBLIC">Public</option><option value="UNLISTED">Unlisted</option><option value="PRIVATE">Private</option></select>${ic('down')}</div>
   </div></div>`;
 }
 
@@ -1380,7 +1387,7 @@ async function pageSettings(section) {
   let st = {};
   try { st = await api('/api/status', 0); } catch {}
   const uiNow = settings.ui === 'old' ? 'old' : 'new';
-  return row(`Giraffe Music ${esc(st.version || '')}${st.demo ? ' (demo)' : ''}`, 'No ads, ever. Built on the ytm-rs core (GPL-3.0).', '')
+  return row(`Giraffe Music ${esc(NATIVE?.appVersion?.() || st.version || '')}${st.demo ? ' (demo)' : ''}`, 'No ads, ever. Built on the ytm-rs core (GPL-3.0).', '')
     + `<div class="srow ui-pick"><div class="grow"><div class="t1">Interface</div><div class="t2">${T(uiNow === 'new' ? 'New: like the latest YouTube Music' : 'Old: the classic Giraffe Music')}</div></div><div class="tg-role"><button class="${uiNow === 'old' ? 'on' : ''}" data-act="setUi" data-v="old">${T('Old')}</button><button class="${uiNow === 'new' ? 'on' : ''}" data-act="setUi" data-v="new">${T('New')}</button></div></div>`
     + row('Battery', NATIVE ? 'Native player with audio offload, a 256 MB audio cache and nothing running in the background.' : 'Web player', '')
     + (NATIVE ? row('Check for updates', `Version ${esc(NATIVE.appVersion?.() || '')}`, 'data-act="checkUpdate"') : '')
@@ -1868,6 +1875,7 @@ const MENU = {
   mShareUrl: ({ name, url }) => share(name, url),
   mRmDl: ({ tracks, name }) => setTimeout(() => askRemoveDownloads(tracks, name), 250),
   mDelLocal: ({ id }) => { ACT.delLocalPl({ dataset: { id } }); },
+  mDelPl: ({ id, name }) => setTimeout(() => ACT.delPl({ dataset: { id, title: name } }), 250),
   mRadio: ({ t }) => P.radio(t),
   mNext: ({ t, tracks }) => P.playNext(tracks || [t]),
   mQueue: ({ t, tracks }) => P.addQueue(tracks || [t]),
@@ -1892,12 +1900,12 @@ const MENU = {
     fetch(`/api/me/playlist/${encodeURIComponent(pid)}/remove`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ videoId: t.id, setId: t.setId }) })
       .then((r) => {
         if (!r.ok) return toast("Couldn't remove it");
-        mem.delete(`/api/playlist/${encodeURIComponent(pid)}`);
+        plChanged(pid);
         const row = $(`.tracks .row[data-list="${k}"][data-i="${l.tracks.indexOf(t)}"]`);
         if (row) row.hidden = true;
         toast('Removed from playlist', { label: 'Undo', fn: () => {
           fetch(`/api/me/playlist/${encodeURIComponent(pid)}/add`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: [t.id] }) })
-            .then(() => { if (row) row.hidden = false; mem.delete(`/api/playlist/${encodeURIComponent(pid)}`); });
+            .then(() => { if (row) row.hidden = false; plChanged(pid); });
         } });
       });
   },
@@ -2017,6 +2025,7 @@ const ACT = {
       ['shuffle', 'Shuffle play', 'mShuffle'], ['radio', 'Start radio', 'mListRadio'], ['playnext', 'Play next', 'mNext'], ['queue', 'Add to queue', 'mQueue'], ['dl', 'Download', 'mDlAll'],
       ['save', 'Save to playlist', 'mToPlaylist'],
       ...(l.tracks.some((t) => DL.has(t.id) || DL.busy(t.id)) ? [['delete', 'Remove downloads', 'mRmDl']] : []),
+      ...(l.playlistId && !isLocalPl(l.playlistId) && me.signedIn ? [['delete', 'Delete playlist', 'mDelPl']] : []),
     ], { tracks: l.tracks, name: l.name, id: l.playlistId });
   },
   dlAll: (el) => {
@@ -2119,17 +2128,18 @@ const ACT = {
   libItemMenu: async (el, e) => {
     e?.preventDefault(); e?.stopPropagation();
     const { kind, id, title } = el.dataset;
-    let tracks = [];
+    let tracks = [], owned = false;
     try {
       if (kind === 'liked') tracks = me.signedIn ? (await api('/api/me/liked', 60e3)).tracks || [] : Object.values(liked).sort((a, b) => b.at - a.at).map((x) => x.t);
       else if (isLocalPl(id)) tracks = localPl(id)?.tracks || [];
-      else tracks = (await api(`/api/${kind}/${encodeURIComponent(id)}`, 60 * 60e3)).tracks || [];
+      else { const c = await api(`/api/${kind}/${encodeURIComponent(id)}${plFresh[id] ? '?v=' + plFresh[id] : ''}`, 60 * 60e3); tracks = c.tracks || []; owned = !!c.owned && me.signedIn; }
     } catch {}
     const url = kind === 'album' ? `https://music.youtube.com/browse/${id}` : `https://music.youtube.com/playlist?list=${String(id).replace(/^VL/, '')}`;
     const items = tracks.length ? [['shuffle', 'Shuffle play', 'mShuffle'], ['playnext', 'Play next', 'mNext'], ['queue', 'Add to queue', 'mQueue'], ['dl', 'Download', 'mDlAll']] : [];
     if (tracks.some((t) => DL.has(t.id) || DL.busy(t.id))) items.push(['delete', 'Remove downloads', 'mRmDl']);
     if (!isLocalPl(id) && kind !== 'liked') items.push(['share', 'Share', 'mShareUrl']);
     if (isLocalPl(id)) items.push(['delete', 'Delete playlist', 'mDelLocal']);
+    else if (owned && kind === 'playlist') items.push(['delete', 'Delete playlist', 'mDelPl']);
     openMenu(`<div class="m-head"><div class="tx"><div class="t1">${esc(T(title))}</div><div class="t2"><span>${tracks.length ? songs(tracks.length) : ''}</span></div></div></div>`, items, { tracks, name: title, url, id });
   },
   tgPeople: () => { TG.view = 'people'; TG.render(); },
@@ -2146,6 +2156,25 @@ const ACT = {
   },
   migMove: () => migrateLocal(),
   nfKeep: () => { nfOffer = null; popOv(); dlUI(); },
+  // Borrar una playlist de tu cuenta (también desaparece de YouTube Music).
+  delPl: (el) => {
+    delPlTarget = { id: el.dataset.id, title: el.dataset.title || '' };
+    const go2 = () => openDialog(`<h2>${esc(T('Delete playlist?'))}</h2>
+      <div class="t2" style="white-space:normal;margin-bottom:16px">${esc(T(`“${delPlTarget.title}” will be deleted from your YouTube Music account too. This can't be undone.`))}</div>
+      <div class="dlg-btns"><button class="ghost" data-act="dlgCancel">Cancel</button><button class="ok danger" data-act="delPlYes">Delete</button></div>`);
+    go2();
+  },
+  delPlYes: async () => {
+    const t = delPlTarget;
+    delPlTarget = null;
+    popOv();
+    if (!t) return;
+    const r = await fetch(`/api/me/playlist/${encodeURIComponent(t.id)}`, { method: 'DELETE' }).catch(() => null);
+    if (!r?.ok) return toast("Couldn't delete the playlist");
+    plChanged(t.id);
+    toast('Playlist deleted');
+    setTimeout(() => go('/library'), 300);
+  },
   rmDlYes: () => { const t = rmDlTracks; rmDlTracks = null; popOv(); if (t) DL.removeMany(t); },
   nfRemove: () => removeMissing(),
   doUpdate: (el) => { const u = el.dataset.url; popOv(); toast('Downloading update…'); NATIVE?.installUpdate(u); },
@@ -2198,8 +2227,7 @@ const ACT = {
     }
     const r = await fetch(`/api/me/playlist/${encodeURIComponent(id)}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, description, privacy }) }).catch(() => null);
     if (!r?.ok) return toast("Couldn't save the changes");
-    mem.delete(`/api/playlist/${encodeURIComponent(id)}`);
-    mem.delete('/api/me/library');
+    plChanged(id);
     toast('Saved');
     history.back();
   },
@@ -2458,7 +2486,7 @@ async function onLoginCookie(cookie) {
   } catch (e) { toast("Couldn't sign in. Try again."); }
 }
 /** Al terminar de bajar una playlist: las que no se encontraron, ¿se quitan de la playlist? */
-let nfOffer = null, rmDlTracks = null;
+let nfOffer = null, rmDlTracks = null, delPlTarget = null;
 /** "¿Quitar las descargas?" para una playlist o álbum (descargado o descargándose). */
 function askRemoveDownloads(tracks, name) {
   const n = tracks.filter((t) => DL.has(t.id) || DL.busy(t.id)).length;
@@ -2492,7 +2520,7 @@ async function removeMissing() {
       const r = await fetch(`/api/me/playlist/${encodeURIComponent(o.pid)}/remove`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ videoId: t.id, setId: t.setId }) }).catch(() => null);
       if (r?.ok) ok++;
     }
-    mem.delete('/api/playlist/' + encodeURIComponent(o.pid)); mem.delete('/api/me/library');
+    plChanged(o.pid);
   }
   // Ya no están en la playlist: no hace falta seguir marcándolas.
   await fetch('/api/downloads/failed', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify(o.tracks.map((t) => t.id)) }).catch(() => {});
@@ -2551,8 +2579,8 @@ async function addToPlaylist(id, { tracks }) {
     return toast(`Saved to “${p.title}”`);
   }
   {
-    r = await fetch(`/api/me/playlist/${encodeURIComponent(id)}/add`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) });
-    if (r.ok) toast('Saved to playlist');
+    r = await fetch(`/api/me/playlist/${encodeURIComponent(id)}/add`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) }).catch(() => ({ ok: false }));
+    if (r.ok) { plChanged(id); toast('Saved to playlist'); }
   }
   if (!r.ok) toast("Couldn't save to that playlist");
   mem.delete('/api/me/library');

@@ -592,3 +592,4 @@ body.has-mini .fabs { bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe-b) 
 .nfb { width: 16px; height: 16px; flex: none; fill: #f28b82; margin-right: 4px; vertical-align: -3px; }
 .row.nf .th, .row.nf .t1 { opacity: .45; }
 .row.nf .t2 span { opacity: .6; }
+.dlg-btns .ok.danger { background: #f28b82; color: #202124; }
