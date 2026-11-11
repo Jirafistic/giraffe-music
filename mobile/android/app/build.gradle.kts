@@ -11,8 +11,8 @@ android {
         applicationId = "com.giraffe.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.2"
+        versionCode = 6
+        versionName = "0.4.0"
         // El repo de GitHub de donde salen las actualizaciones ("usuario/repo"), en gradle.properties.
         buildConfigField("String", "UPDATE_REPO", "\"${project.findProperty("giraffe.updateRepo") ?: ""}\"")
     }
@@ -83,4 +83,8 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.webkit:webkit:1.12.1")
+    // Escanear el QR de Escuchar juntos: el lector de Google Play Services (sin permiso de cámara).
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // La de Google trae un Fragment viejo; este es el que pide la API de resultados de Activity.
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
 }

@@ -21,6 +21,7 @@ static FILES: &[(&str, &[u8])] = files![
     "index.html",
     "app.css",
     "app.js",
+    "i18n.js",
     "sw.js",
     "manifest.webmanifest",
     "icons/icon.svg",

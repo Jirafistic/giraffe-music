@@ -185,6 +185,12 @@ pub fn search(q: &str, _filter: &str) -> Value {
         "albums": albums.iter().map(|&i| album_card(i)).collect::<Vec<_>>(),
         "playlists": (0..3).map(mix_card).collect::<Vec<_>>(),
         "videos": [],
+        // Demo: todas las canciones tienen la misma letra; la primera sirve de ejemplo.
+        "lyrics": lyrics(SONGS[0].title)["synced"].as_str().and_then(|l| crate::api::lyric_match(l, q)).map(|line| {
+            let mut t = track(0);
+            t["lyricLine"] = json!(line);
+            vec![t]
+        }).unwrap_or_default(),
     })
 }
 

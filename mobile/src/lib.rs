@@ -42,6 +42,7 @@ mod transfer;
 mod api;
 mod demo;
 mod downloads;
+mod together;
 mod web;
 
 #[cfg(target_os = "android")]
@@ -58,6 +59,7 @@ pub struct App {
     pub web_dir: Option<PathBuf>,
     pub streams: api::StreamCache,
     pub downloads: downloads::Downloads,
+    pub together: together::Together,
     /// Modo demo: si se "inició sesión" con la cuenta de ejemplo.
     pub demo_auth: std::sync::atomic::AtomicBool,
     pub data_dir: PathBuf,
@@ -99,13 +101,15 @@ pub async fn build(o: Options) -> anyhow::Result<axum::Router> {
         }
     }
     let downloads = downloads::Downloads::open(o.data_dir.join("downloads"))?;
-    let app = Arc::new(App { api, demo: o.demo, web_dir: o.web_dir, streams: Default::default(), downloads, demo_auth: Default::default(), data_dir: o.data_dir.clone(), transfer: Default::default() });
+    let app = Arc::new(App { api, demo: o.demo, web_dir: o.web_dir, streams: Default::default(), downloads, together: Default::default(), demo_auth: Default::default(), data_dir: o.data_dir.clone(), transfer: Default::default() });
     if !o.demo {
         // Que la primera pantalla no espere el visitorData.
         let a = app.clone();
         tokio::spawn(async move { a.api.ensure_visitor().await });
     }
-    Ok(api::routes().merge(account::routes()).merge(transfer::routes()).merge(downloads::routes()).merge(web::routes()).with_state(app))
+    // Las descargas que quedaron a la mitad la última vez siguen solas.
+    downloads::resume(app.clone());
+    Ok(api::routes().merge(account::routes()).merge(transfer::routes()).merge(downloads::routes()).merge(together::routes()).merge(web::routes()).with_state(app))
 }
 
 /// Puerto fijo del servidor local del APK: el mismo en cada arranque, así el WebView

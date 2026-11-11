@@ -1,7 +1,7 @@
 // Giraffe Music fuera del APK (navegador): guarda la app en el teléfono para abrir
 // al instante y sin red. El audio nunca pasa por acá (rangos, y es grande).
 const V = 'gm-v1';
-const SHELL = ['/', '/app.css', '/app.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
+const SHELL = ['/', '/app.css', '/app.js', '/i18n.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {

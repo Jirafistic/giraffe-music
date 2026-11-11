@@ -281,7 +281,8 @@ class MainActivity : ComponentActivity() {
     /** La calidad elegida para la red actual (datos móviles o Wi-Fi), como en YouTube Music. */
     private fun quality(): String {
         val p = getSharedPreferences("giraffe", Context.MODE_PRIVATE)
-        val q = if (metered()) p.getString("qMobile", "normal") else p.getString("qWifi", "normal")
+        // Con Wi-Fi siempre la mejor; con datos lo que elija el usuario (Automática = normal).
+        val q = if (metered()) p.getString("qMobile", "normal") else "high"
         return if (q == "low" || q == "high") "?q=$q" else ""
     }
 
@@ -305,6 +306,17 @@ class MainActivity : ComponentActivity() {
             val from = c.currentMediaItemIndex + 1
             if (from < c.mediaItemCount) c.removeMediaItems(from, c.mediaItemCount)
             c.addMediaItems(items(json))
+        }
+
+        /** Todo menos la que suena: lo de antes y lo de después (para mezclar sin cortar). */
+        @JavascriptInterface
+        fun rebase(before: String, after: String) = ui { c ->
+            val i = c.currentMediaItemIndex
+            if (i + 1 < c.mediaItemCount) c.removeMediaItems(i + 1, c.mediaItemCount)
+            if (i > 0) c.removeMediaItems(0, i)
+            val b = items(before)
+            if (b.isNotEmpty()) c.addMediaItems(0, b)
+            c.addMediaItems(items(after))
         }
 
         @JavascriptInterface
@@ -432,6 +444,27 @@ class MainActivity : ComponentActivity() {
                     emit(JSONObject().put("e", "update").put("error", e.message ?: "error"))
                 }
             }.start()
+        }
+
+        /** Escuchar juntos: el lector de QR de Google (abre su propia pantalla de cámara). */
+        @JavascriptInterface
+        fun scanQr() = main.post {
+            val opts = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE).build()
+            runCatching {
+                com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(this@MainActivity, opts).startScan()
+                    .addOnSuccessListener { emit(JSONObject().put("e", "qr").put("text", it.rawValue ?: "")) }
+                    .addOnCanceledListener { emit(JSONObject().put("e", "qr").put("cancel", true)) }
+                    .addOnFailureListener { emit(JSONObject().put("e", "qr").put("error", it.message ?: "error")) }
+            }.onFailure { emit(JSONObject().put("e", "qr").put("error", it.message ?: "error")) }
+        }
+
+        /** Conectado a una red Wi-Fi (Escuchar juntos funciona dentro de la misma red). */
+        @JavascriptInterface
+        fun onWifi(): Boolean {
+            val cm = getSystemService(ConnectivityManager::class.java)
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
         }
 
         /** Hay descargas nuevas: la notificación las sigue hasta que terminen. */

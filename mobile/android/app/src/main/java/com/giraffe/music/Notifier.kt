@@ -18,7 +18,6 @@ import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Las notificaciones propias de Giraffe (la de la música la pone Media3):
@@ -29,21 +28,23 @@ import java.util.concurrent.atomic.AtomicBoolean
 object Notifier {
     private const val CH_DL = "downloads"
     private const val CH_UPD = "updates"
-    private const val ID_DL = 2
+    const val ID_DL = 2
+    private const val ID_DL_DONE = 4
     private const val ID_UPD = 3
     private const val JOB_UPDATE = 10
     const val EXTRA_UPDATE = "giraffe.update"
 
-    private fun channels(ctx: Context): NotificationManager {
+    fun channels(ctx: Context): NotificationManager {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CH_DL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CH_DL, "Downloads", NotificationManager.IMPORTANCE_LOW))
-            nm.createNotificationChannel(NotificationChannel(CH_UPD, "App updates", NotificationManager.IMPORTANCE_DEFAULT))
+            val es = es(ctx)
+            nm.createNotificationChannel(NotificationChannel(CH_DL, if (es) "Descargas" else "Downloads", NotificationManager.IMPORTANCE_LOW))
+            nm.createNotificationChannel(NotificationChannel(CH_UPD, if (es) "Actualizaciones" else "App updates", NotificationManager.IMPORTANCE_DEFAULT))
         }
         return nm
     }
 
-    private fun allowed(ctx: Context) = Build.VERSION.SDK_INT < 33 ||
+    fun allowed(ctx: Context) = Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     private fun openApp(ctx: Context, update: Boolean): PendingIntent {
@@ -54,58 +55,61 @@ object Notifier {
 
     // ------------------------------------------------------------------ descargas
 
-    private val watching = AtomicBoolean(false)
-
-    /** Sigue las descargas del núcleo hasta que terminen. Pregunta cada 1,5 s solo mientras
-     *  hay descargas (una respuesta chica), y no depende de que la pantalla esté abierta. */
-    fun watchDownloads(ctx: Context, port: Int) {
-        if (port <= 0 || !watching.compareAndSet(false, true)) return
-        val app = ctx.applicationContext
-        Thread {
-            val seen = HashSet<String>()
-            var idle = 0
-            try {
-                while (idle < 3) {
-                    val active = runCatching { JSONObject(get("http://127.0.0.1:$port/api/downloads/active")) }.getOrNull() ?: JSONObject()
-                    val ids = active.keys().asSequence().toList()
-                    if (ids.isEmpty()) idle++ else { idle = 0; seen.addAll(ids) }
-                    if (ids.isNotEmpty()) {
-                        val partial = ids.sumOf { active.optDouble(it, 0.0) }
-                        val done = seen.size - ids.size
-                        showDownloads(app, done, seen.size, ((done + partial) * 1000 / seen.size).toInt())
-                    }
-                    Thread.sleep(1500)
-                }
-            } finally {
-                watching.set(false)
-                if (seen.isNotEmpty()) showDownloadsDone(app, seen.size)
-            }
-        }.start()
+    /** Español si el usuario lo eligió en la app (o el teléfono está en español). */
+    fun es(ctx: Context): Boolean {
+        val l = ctx.getSharedPreferences("giraffe", Context.MODE_PRIVATE).getString("lang", "auto")
+        return l == "es" || (l != "en" && java.util.Locale.getDefault().language == "es")
     }
 
-    private fun showDownloads(ctx: Context, done: Int, total: Int, permille: Int) {
-        if (!allowed(ctx)) return
-        val n = NotificationCompat.Builder(ctx, CH_DL)
+    /** Hay descargas: el servicio las mantiene vivas aunque la app quede en segundo plano. */
+    fun watchDownloads(ctx: Context, port: Int) {
+        if (port <= 0 || DownloadService.running) return
+        val i = Intent(ctx, DownloadService::class.java).putExtra("port", port)
+        runCatching { ContextCompat.startForegroundService(ctx, i) }
+    }
+
+    fun downloadsNotification(ctx: Context, done: Int, total: Int, permille: Int, cancel: PendingIntent?): android.app.Notification {
+        channels(ctx)
+        val es = es(ctx)
+        val b = NotificationCompat.Builder(ctx, CH_DL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Downloading ${done + 1} of $total")
-            .setContentText(if (total > 1) "$done of $total songs downloaded" else "Downloading song")
-            .setProgress(1000, permille.coerceIn(0, 1000), false)
+            .setContentTitle(when {
+                total == 0 -> if (es) "Preparando descargas…" else "Preparing downloads…"
+                es -> "Descargando ${done + 1} de $total"
+                else -> "Downloading ${done + 1} of $total"
+            })
+            .setContentText(if (es) "$done de $total canciones descargadas" else "$done of $total songs downloaded")
+            .setProgress(1000, permille.coerceIn(0, 1000), total == 0)
             .setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
             .setContentIntent(openApp(ctx, false))
-            .build()
-        runCatching { channels(ctx).notify(ID_DL, n) }
+        if (cancel != null) b.addAction(0, if (es) "Cancelar" else "Cancel", cancel)
+        return b.build()
     }
 
-    private fun showDownloadsDone(ctx: Context, total: Int) {
-        if (!allowed(ctx)) return
+    fun showDownloadsDone(ctx: Context, total: Int) {
+        if (!allowed(ctx) || total <= 0) return
+        val es = es(ctx)
         val n = NotificationCompat.Builder(ctx, CH_DL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Downloads complete")
-            .setContentText(if (total == 1) "1 song downloaded" else "$total songs downloaded")
+            .setContentTitle(if (es) "Descargas completas" else "Downloads complete")
+            .setContentText(when {
+                es && total == 1 -> "Se descargó 1 canción"
+                es -> "Se descargaron $total canciones"
+                total == 1 -> "1 song downloaded"
+                else -> "$total songs downloaded"
+            })
             .setAutoCancel(true).setSilent(true)
             .setContentIntent(openApp(ctx, false))
             .build()
-        runCatching { channels(ctx).notify(ID_DL, n) }
+        runCatching { channels(ctx).notify(ID_DL_DONE, n) }
+    }
+
+    fun get(url: String, method: String = "GET"): String {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 15000; c.readTimeout = 15000; c.requestMethod = method
+        c.setRequestProperty("Accept", "application/json")
+        c.setRequestProperty("User-Agent", "GiraffeMusic")
+        try { return c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
     }
 
     // ------------------------------------------------------------------ versión nueva
@@ -135,8 +139,8 @@ object Notifier {
         if (!allowed(ctx)) return
         val n = NotificationCompat.Builder(ctx, CH_UPD)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Giraffe Music $ver is available")
-            .setContentText("Tap to update")
+            .setContentTitle(if (es(ctx)) "Giraffe Music $ver está disponible" else "Giraffe Music $ver is available")
+            .setContentText(if (es(ctx)) "Toca para actualizar" else "Tap to update")
             .setAutoCancel(true)
             .setContentIntent(openApp(ctx, true))
             .build()
@@ -156,13 +160,6 @@ object Notifier {
         return false
     }
 
-    private fun get(url: String): String {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 15000; c.readTimeout = 15000
-        c.setRequestProperty("Accept", "application/json")
-        c.setRequestProperty("User-Agent", "GiraffeMusic")
-        try { return c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
-    }
 }
 
 /** El trabajo diario del sistema que busca versiones nuevas (no deja nada corriendo). */
@@ -176,4 +173,74 @@ class UpdateCheckJob : JobService() {
     }
 
     override fun onStopJob(params: JobParameters) = true
+}
+
+/**
+ * Mantiene las descargas andando con la app en segundo plano o la pantalla apagada:
+ * un servicio en primer plano con la notificación de progreso. Solo existe mientras
+ * hay algo que bajar; al terminar se cierra solo (y suelta el wakelock).
+ */
+class DownloadService : android.app.Service() {
+    companion object { @Volatile var running = false }
+    private var thread: Thread? = null
+    private var wake: android.os.PowerManager.WakeLock? = null
+    private var wifi: android.net.wifi.WifiManager.WifiLock? = null
+
+    override fun onBind(intent: Intent?) = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val port = intent?.getIntExtra("port", -1) ?: -1
+        if (intent?.action == "cancel") {
+            Thread { runCatching { Notifier.get("http://127.0.0.1:$port/api/downloads/active", "DELETE") } }.start()
+            return START_NOT_STICKY
+        }
+        val cancel = PendingIntent.getService(this, 5, Intent(this, DownloadService::class.java).setAction("cancel").putExtra("port", port),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val first = Notifier.downloadsNotification(this, 0, 0, 0, cancel)
+        if (Build.VERSION.SDK_INT >= 29) startForeground(Notifier.ID_DL, first, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        else startForeground(Notifier.ID_DL, first)
+        if (running || port <= 0) return START_NOT_STICKY
+        running = true
+        wake = (getSystemService(POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "giraffe:downloads").apply { setReferenceCounted(false); acquire(30 * 60 * 1000L) }
+        @Suppress("DEPRECATION")
+        wifi = (applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager)
+            .createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "giraffe:downloads").apply { setReferenceCounted(false); acquire() }
+        thread = Thread {
+            val seen = HashSet<String>()
+            val nm = Notifier.channels(this)
+            var idle = 0
+            var finished = 0
+            try {
+                while (idle < 3 && running) {
+                    val active = runCatching { JSONObject(Notifier.get("http://127.0.0.1:$port/api/downloads/active")) }.getOrNull() ?: JSONObject()
+                    val ids = active.keys().asSequence().toList()
+                    if (ids.isEmpty()) idle++ else { idle = 0; seen.addAll(ids) }
+                    if (ids.isNotEmpty()) {
+                        val partial = ids.sumOf { active.optDouble(it, 0.0) }
+                        finished = seen.size - ids.size
+                        if (Notifier.allowed(this)) runCatching {
+                            nm.notify(Notifier.ID_DL, Notifier.downloadsNotification(this, finished, seen.size, ((finished + partial) * 1000 / seen.size).toInt(), cancel))
+                        }
+                        wake?.acquire(30 * 60 * 1000L)
+                    }
+                    Thread.sleep(1500)
+                }
+                finished = seen.size
+            } catch (_: InterruptedException) {
+            } finally {
+                running = false
+                runCatching { wake?.release(); wifi?.release() }
+                if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true)
+                Notifier.showDownloadsDone(this, finished)
+                stopSelf()
+            }
+        }.apply { start() }
+        return START_NOT_STICKY
+    }
+
+    /** Android 15 limita estos servicios a 6 h por día: se corta prolijo y sigue la próxima vez. */
+    override fun onTimeout(startId: Int, fgsType: Int) { running = false; thread?.interrupt() }
+
+    override fun onDestroy() { running = false; runCatching { wake?.release(); wifi?.release() }; super.onDestroy() }
 }

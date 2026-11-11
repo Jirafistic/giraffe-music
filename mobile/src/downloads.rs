@@ -51,6 +51,8 @@ pub struct Downloads {
     /// Progreso (0..1) de las que se están bajando o esperan su turno.
     active: Mutex<HashMap<String, f32>>,
     one_at_a_time: tokio::sync::Semaphore,
+    /// Las que faltan bajar, en orden. Se guardan para seguir si la app se cierra.
+    pending: Mutex<Vec<Value>>,
 }
 
 /// La clave de una canción: un generador xorshift a partir de su id.
@@ -108,7 +110,8 @@ impl Downloads {
                 }
             }
         }
-        Ok(Self { dir, index: Mutex::new(index), active: Default::default(), one_at_a_time: tokio::sync::Semaphore::new(1) })
+        let pending = std::fs::read(dir.join("pending.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        Ok(Self { dir, index: Mutex::new(index), active: Default::default(), one_at_a_time: tokio::sync::Semaphore::new(1), pending: Mutex::new(pending) })
     }
 
     fn save_index(&self) {
@@ -117,6 +120,19 @@ impl Downloads {
         if std::fs::write(&tmp, data).is_ok() {
             let _ = std::fs::rename(tmp, self.dir.join("index.json"));
         }
+    }
+
+    fn save_pending(&self) {
+        let data = serde_json::to_vec(&*self.pending.lock().unwrap()).unwrap_or_default();
+        let tmp = self.dir.join("pending.json.tmp");
+        if std::fs::write(&tmp, data).is_ok() {
+            let _ = std::fs::rename(tmp, self.dir.join("pending.json"));
+        }
+    }
+
+    fn unpend(&self, id: &str) {
+        self.pending.lock().unwrap().retain(|t| t["id"].as_str() != Some(id));
+        self.save_pending();
     }
 
     fn file(&self, id: &str, ext: &str) -> PathBuf {
@@ -196,7 +212,7 @@ impl Downloads {
 pub fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/downloads", get(list).delete(clear))
-        .route("/api/downloads/active", get(active))
+        .route("/api/downloads/active", get(active).delete(cancel_all))
         .route("/api/download/{id}", post(start).delete(remove))
         .route("/api/dl/cover/{id}", get(cover))
 }
@@ -213,7 +229,17 @@ async fn active(State(app): State<Arc<App>>) -> Response {
     Json(a).into_response()
 }
 
+/// Cancela todo lo que falta bajar (botón "Cancel" de la notificación).
+async fn cancel_all(State(app): State<Arc<App>>) -> Response {
+    app.downloads.active.lock().unwrap().clear();
+    app.downloads.pending.lock().unwrap().clear();
+    app.downloads.save_pending();
+    Json(json!({"ok": true})).into_response()
+}
+
 async fn remove(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+    app.downloads.active.lock().unwrap().remove(&id);
+    app.downloads.unpend(&id);
     app.downloads.remove(&id).await;
     Json(json!({"ok": true})).into_response()
 }
@@ -257,27 +283,58 @@ async fn start(State(app): State<Arc<App>>, Path(id): Path<String>, Json(track):
     if app.downloads.index.lock().unwrap().contains_key(&id) {
         return Json(json!({"ok": true, "done": true})).into_response();
     }
+    enqueue(&app, id, track, true);
+    Json(json!({"ok": true})).into_response()
+}
+
+/// Al abrir la app: vuelve a poner en la cola lo que había quedado pendiente.
+pub fn resume(app: Arc<App>) {
+    let list = app.downloads.pending.lock().unwrap().clone();
+    for t in list {
+        if let Some(id) = t["id"].as_str().map(str::to_owned) {
+            enqueue(&app, id, t, false);
+        }
+    }
+}
+
+/// Una por vez. Si algo falla (se cortó internet, YouTube no respondió) se reintenta con
+/// esperas cada vez más largas; solo se abandona si la cancelan o falla muchas veces seguidas.
+fn enqueue(app: &Arc<App>, id: String, track: Value, save: bool) {
     {
         let mut active = app.downloads.active.lock().unwrap();
         if active.contains_key(&id) {
-            return Json(json!({"ok": true})).into_response();
+            return;
         }
         active.insert(id.clone(), 0.0);
+    }
+    if save {
+        app.downloads.pending.lock().unwrap().push(track.clone());
+        app.downloads.save_pending();
     }
     let a = app.clone();
     tokio::spawn(async move {
         let _turn = a.downloads.one_at_a_time.acquire().await;
-        // Pudo haberse cancelado mientras esperaba.
-        if !a.downloads.active.lock().unwrap().contains_key(&id) {
-            return;
-        }
-        if let Err(e) = download(&a, &id, track).await {
-            log::warn!("descarga de {id}: {e:#}");
-            let _ = tokio::fs::remove_file(a.downloads.file(&id, "a.part")).await;
+        for attempt in 0..6u64 {
+            // Pudo haberse cancelado mientras esperaba.
+            if !a.downloads.active.lock().unwrap().contains_key(&id) {
+                break;
+            }
+            match download(&a, &id, track.clone()).await {
+                Ok(()) => break,
+                Err(e) => {
+                    log::warn!("descarga de {id} (intento {}): {e:#}", attempt + 1);
+                    let _ = tokio::fs::remove_file(a.downloads.file(&id, "a.part")).await;
+                    if e.to_string().contains("cancelada") || attempt == 5 {
+                        break;
+                    }
+                    progress(&a, &id, 0.0);
+                    tokio::time::sleep(Duration::from_secs([3, 10, 30, 60, 120][attempt as usize])).await;
+                }
+            }
         }
         a.downloads.active.lock().unwrap().remove(&id);
+        a.downloads.unpend(&id);
     });
-    Json(json!({"ok": true})).into_response()
 }
 
 fn progress(app: &App, id: &str, p: f32) {
