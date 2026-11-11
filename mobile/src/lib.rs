@@ -43,6 +43,7 @@ mod api;
 mod demo;
 mod downloads;
 mod together;
+mod covers;
 mod web;
 
 #[cfg(target_os = "android")]
@@ -109,7 +110,7 @@ pub async fn build(o: Options) -> anyhow::Result<axum::Router> {
     }
     // Las descargas que quedaron a la mitad la última vez siguen solas.
     downloads::resume(app.clone());
-    Ok(api::routes().merge(account::routes()).merge(transfer::routes()).merge(downloads::routes()).merge(together::routes()).merge(web::routes()).with_state(app))
+    Ok(api::routes().merge(account::routes()).merge(transfer::routes()).merge(downloads::routes()).merge(together::routes()).merge(covers::routes()).merge(web::routes()).with_state(app))
 }
 
 /// Puerto fijo del servidor local del APK: el mismo en cada arranque, así el WebView

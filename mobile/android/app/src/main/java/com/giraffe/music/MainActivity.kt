@@ -18,6 +18,8 @@ import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import androidx.activity.result.PickVisualMediaRequest
+import android.webkit.ValueCallback
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -55,6 +57,12 @@ class MainActivity : ComponentActivity() {
     private val main = Handler(Looper.getMainLooper())
     private var insetTop = 0
     private var insetBottom = 0
+
+    private var fileCb: ValueCallback<Array<Uri>>? = null
+    private val pickImage = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        fileCb?.onReceiveValue(uri?.let { arrayOf(it) })
+        fileCb = null
+    }
 
     /** Permiso de notificaciones (Android 13+): se pide una sola vez, al abrir la app. */
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -106,7 +114,17 @@ class MainActivity : ComponentActivity() {
         }
         web.addJavascriptInterface(Bridge(), "GiraffeNative")
         // Diálogos de la página (confirmar borrar descargas, etc.).
-        web.webChromeClient = WebChromeClient()
+        web.webChromeClient = object : WebChromeClient() {
+            /** Elegir una foto (la portada de una playlist): el selector de fotos de Android,
+             *  que no pide permisos. */
+            override fun onShowFileChooser(view: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
+                fileCb?.onReceiveValue(null)
+                fileCb = cb
+                runCatching { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                    .onFailure { fileCb?.onReceiveValue(null); fileCb = null }
+                return true
+            }
+        }
         web.webViewClient = object : WebViewClient() {
             // La página pudo no estar lista cuando llegaron los márgenes: se mandan de nuevo.
             override fun onPageFinished(view: WebView, url: String?) {

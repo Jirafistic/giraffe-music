@@ -67,6 +67,9 @@ function plChanged(id) {
   plFresh[id] = Date.now();
   for (const k of [...mem.keys()]) if (k.includes(encodeURIComponent(id)) || k === '/api/me/library') mem.delete(k);
 }
+/** Portadas propias de playlists (elegidas en la app): id → versión. Se ven solo en Giraffe. */
+let COVERS = store.get('covers', {});
+const coverOf = (id) => (COVERS[id] ? `/api/cover/${encodeURIComponent(id)}?v=${COVERS[id]}` : '');
 const imgUrl = (u) => !u ? '' : u.startsWith('/') ? u : '/api/img?u=' + encodeURIComponent(u);
 
 // ------------------------------------------------------------------ descargas (las guarda el núcleo nativo)
@@ -616,6 +619,7 @@ let OV = [];
 function applyOv(stack) {
   const was = OV;
   OV = stack.slice();
+  if (was.includes('crop') && !OV.includes('crop')) CROP.close();
   const pl = OV.includes('player');
   const pe = $('#player');
   pe.scrollTop = 0; $('.pl-body').scrollTop = 0; $('#sheet').scrollTop = 0;
@@ -1047,6 +1051,7 @@ async function pageLibrary() {
     items = loc.concat(items);
   }
   if (!me.signedIn && !f) html += signinCard('Sign in to see your playlists, albums and likes from YouTube Music.');
+  for (const x of items) if (x.kind === 'playlist' && coverOf(x.id)) x.thumb = coverOf(x.id);
   if (settings.libSort === 'az') items.sort((a, b) => a.title.localeCompare(b.title));
   else if (settings.libSort === 'added') items.sort((a, b) => (b.at || 0) - (a.at || 0));
   if (settings.libGrid) {
@@ -1121,9 +1126,9 @@ async function pageCollection(id, isAlbum) {
   const key = `${isAlbum ? 'album' : 'playlist'}:${id}`;
   const by = c.artists?.length ? c.artists.map((a) => a.id ? `<a href="/artist/${encodeURIComponent(a.id)}">${esc(a.name)}</a>` : esc(a.name)).join(', ') : '';
   const save = c.owned && me.signedIn ? `<a class="round-btn" href="/playlist/${encodeURIComponent(id)}/edit" aria-label="Edit">${ic('edit')}</a>` : `<button class="round-btn" data-act="saveLib" data-key="${esc(key)}" data-kind="${isAlbum ? 'album' : 'playlist'}" data-id="${esc(id)}" data-title="${esc(c.title)}" data-sub="${esc(c.subtitle)}" data-thumb="${esc(c.thumb || '')}" data-save="${esc(c.saveId || id)}" aria-label="Save">${ic(lib[key] ? 'lib-check' : 'lib-add')}</button>`;
-  if (location.pathname.endsWith('/edit')) return editHTML(id, c);
+  if (location.pathname.endsWith('/edit')) return editHTML(id, { ...c, thumb: coverOf(id) || c.thumb });
   afterRender = null;
-  const hero = collHero({ title: c.title, thumb: c.thumb, by, meta: esc(c.subtitle), desc: c.description, k, save });
+  const hero = collHero({ title: c.title, thumb: (!isAlbum && coverOf(id)) || c.thumb, by, meta: esc(c.subtitle), desc: c.description, k, save });
   const rows = c.tracks.map((t, i) => rowHTML(t, k, i, isAlbum ? { num: i + 1, sub: 'none' } : { sub: 'album' })).join('');
   setTimeout(dlUI);
   const after = afterRender;
@@ -1283,13 +1288,13 @@ function pageLocalPlaylist(id) {
   const p = localPl(id);
   if (!p) return `<div class="empty"><h3>Nothing here yet</h3></div>`;
   $top.querySelector('.ttl').textContent = p.title;
-  if (location.pathname.endsWith('/edit')) return editHTML(id, { title: p.title, description: p.description, thumb: p.tracks[0]?.thumb, local: true });
+  if (location.pathname.endsWith('/edit')) return editHTML(id, { title: p.title, description: p.description, thumb: coverOf(id) || p.tracks[0]?.thumb, local: true });
   const k = reg(p.tracks, p.title);
   LISTS.get(k).playlistId = id;
   const dur = p.tracks.reduce((s, t) => s + (t.duration || 0), 0);
   const save = `<a class="round-btn" href="/playlist/${encodeURIComponent(id)}/edit" aria-label="Edit">${ic('edit')}</a>`;
   setTimeout(dlUI);
-  return collHero({ title: p.title, thumb: p.tracks[0]?.thumb, meta: `${T('Saved on this device')} • ${songs(p.tracks.length)}${dur ? ' • ' + fmtLong(dur) : ''}`, desc: p.description, k, save })
+  return collHero({ title: p.title, thumb: coverOf(id) || p.tracks[0]?.thumb, meta: `${T('Saved on this device')} • ${songs(p.tracks.length)}${dur ? ' • ' + fmtLong(dur) : ''}`, desc: p.description, k, save })
     + addRow(id, p.title) + (p.tracks.length ? `<div class="tracks">${p.tracks.map((t, i) => rowHTML(t, k, i, { sub: 'album' })).join('')}</div>` : `<div class="empty">${T('Songs you like or save show up here.')}</div>`);
 }
 function editHTML(id, c) {
@@ -1302,7 +1307,7 @@ function editHTML(id, c) {
       i.oninput = upd; upd();
     }
   };
-  return `<div id="edForm" data-id="${esc(id)}"><div class="ed-cover">${thumbImg(c.thumb, 200)}</div><div class="ed">
+  return `<div id="edForm" data-id="${esc(id)}"><button class="ed-cover" data-act="coverMenu" data-id="${esc(id)}" aria-label="Change cover">${thumbImg(c.thumb, 200)}<span class="ed-cam">${ic('edit')}</span></button><div class="ed">
     <div class="ed-f"><label>Title</label><input id="edTitle" maxlength="150" value="${esc(c.title)}"><div class="cnt" id="edTitleN"></div></div>
     <div class="ed-f"><label>Description (optional)</label><textarea id="edDesc" rows="1" maxlength="5000">${esc(c.description || '')}</textarea><div class="cnt" id="edDescN"></div></div>
     <div class="ed-row" data-act="${c.local ? 'delLocalPl' : 'delPl'}" data-id="${esc(id)}" data-title="${esc(c.title)}">${ic('delete')}<span>Delete playlist</span></div><div class="ed-row"${c.local ? ' hidden' : ''}>${ic('globe')}<select id="edPrivacy"><option value="">Keep current visibility</option><option value="PUBLIC">Public</option><option value="UNLISTED">Unlisted</option><option value="PRIVATE">Private</option></select>${ic('down')}</div>
@@ -1873,6 +1878,19 @@ function openMenu(head, items, ctx) {
 }
 const MENU = {
   mShareUrl: ({ name, url }) => share(name, url),
+  mCoverPick: () => {
+    // El selector de fotos de Android (lo abre la app); después, el recorte.
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = () => inp.files[0] && CROP.open(inp.files[0], coverId);
+    setTimeout(() => inp.click(), 200);
+  },
+  mCoverRemove: async () => {
+    await fetch('/api/cover/' + encodeURIComponent(coverId), { method: 'DELETE' }).catch(() => {});
+    delete COVERS[coverId]; store.set('covers', COVERS);
+    toast('Photo removed');
+    setTimeout(() => render(scrollY), 250);
+  },
   mRmDl: ({ tracks, name }) => setTimeout(() => askRemoveDownloads(tracks, name), 250),
   mDelLocal: ({ id }) => { ACT.delLocalPl({ dataset: { id } }); },
   mDelPl: ({ id, name }) => setTimeout(() => ACT.delPl({ dataset: { id, title: name } }), 250),
@@ -2175,6 +2193,15 @@ const ACT = {
     toast('Playlist deleted');
     setTimeout(() => go('/library'), 300);
   },
+  coverMenu: (el) => {
+    coverId = el.dataset.id;
+    openMenu(`<div class="m-head"><div class="tx"><div class="t1">${esc(T('Playlist cover'))}</div><div class="t2"><span>${esc(T('Only shown in Giraffe Music'))}</span></div></div></div>`,
+      [['image', 'Choose a photo', 'mCoverPick'], ...(COVERS[coverId] ? [['delete', 'Remove photo', 'mCoverRemove']] : [])], {});
+  },
+  cropCancel: () => popOv(),
+  cropDone: () => CROP.save(),
+  cropFit: () => CROP.fit(),
+  cropFill: () => CROP.fill(),
   rmDlYes: () => { const t = rmDlTracks; rmDlTracks = null; popOv(); if (t) DL.removeMany(t); },
   nfRemove: () => removeMissing(),
   doUpdate: (el) => { const u = el.dataset.url; popOv(); toast('Downloading update…'); NATIVE?.installUpdate(u); },
@@ -2486,7 +2513,100 @@ async function onLoginCookie(cookie) {
   } catch (e) { toast("Couldn't sign in. Try again."); }
 }
 /** Al terminar de bajar una playlist: las que no se encontraron, ¿se quitan de la playlist? */
-let nfOffer = null, rmDlTracks = null, delPlTarget = null;
+let nfOffer = null, rmDlTracks = null, delPlTarget = null, coverId = null;
+/**
+ * Recortar la portada, como al elegir una foto de perfil: se arrastra para mover, se pellizca
+ * (o la barra) para el zoom, y "Rellenar" / "Ajustar" la deja recortada o entera. Todo se
+ * mueve con transform (la GPU) y la foto se guarda ya recortada, 720×720.
+ */
+const CROP = {
+  img: null, id: null, s: 1, x: 0, y: 0, min: 1, max: 4, cover: 1, url: '',
+  async open(file, id) {
+    this.id = id;
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = URL.createObjectURL(file);
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = this.url;
+    try { await img.decode(); } catch { return toast("Couldn't open that photo"); }
+    this.img = img;
+    pushOv('crop');
+    let el = $('#crop');
+    if (!el) { document.body.insertAdjacentHTML('beforeend', '<div id="crop" hidden></div>'); el = $('#crop'); }
+    el.innerHTML = L(`<div class="crop-top"><button class="icon-btn" data-act="cropCancel" aria-label="Close">${ic('close')}</button><div class="grow ttl">Crop</div><button class="pill solid" data-act="cropDone">Done</button></div>
+      <div class="crop-stage"><div class="crop-frame" id="cropFrame"><img id="cropImg" src="${this.url}" alt="" draggable="false"></div></div>
+      <div class="crop-bottom"><input id="cropZoom" type="range" min="0" max="1000" value="0" aria-label="Zoom">
+        <div class="crop-modes"><button class="pill" data-act="cropFill">Fill</button><button class="pill" data-act="cropFit">Fit</button></div></div>`);
+    el.hidden = false;
+    requestAnimationFrame(() => { this.measure(); this.fill(); this.gestures(); });
+  },
+  measure() {
+    const f = $('#cropFrame').clientWidth, { naturalWidth: w, naturalHeight: h } = this.img;
+    this.F = f;
+    this.cover = Math.max(f / w, f / h);  // la foto cubre todo el cuadrado
+    this.min = Math.min(f / w, f / h);    // la foto entera adentro
+    this.max = this.cover * 4;
+    $('#cropImg').style.width = w + 'px'; $('#cropImg').style.height = h + 'px';
+  },
+  fit() { this.s = this.min; this.x = 0; this.y = 0; this.apply(); },
+  fill() { this.s = this.cover; this.x = 0; this.y = 0; this.apply(); },
+  clamp() {
+    this.s = Math.min(this.max, Math.max(this.min, this.s));
+    const w = this.img.naturalWidth * this.s, h = this.img.naturalHeight * this.s, f = this.F;
+    // Si la foto es más grande que el cuadro, no puede quedar un hueco; si es más chica, no se sale.
+    const lx = Math.abs(w - f) / 2, ly = Math.abs(h - f) / 2;
+    this.x = Math.min(lx, Math.max(-lx, this.x)); this.y = Math.min(ly, Math.max(-ly, this.y));
+  },
+  apply() {
+    this.clamp();
+    const { naturalWidth: w, naturalHeight: h } = this.img;
+    $('#cropImg').style.transform = `translate(${this.x + (this.F - w) / 2}px, ${this.y + (this.F - h) / 2}px) scale(${this.s})`;
+    const z = $('#cropZoom');
+    if (z && !z.dragging) z.value = Math.round(((this.s - this.min) / (this.max - this.min || 1)) * 1000);
+  },
+  gestures() {
+    const stage = $('.crop-stage'), pts = new Map();
+    let last = null;
+    const snap = () => { const p = [...pts.values()]; return p.length > 1 ? { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2, d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) } : { x: p[0].x, y: p[0].y, d: 0 }; };
+    stage.onpointerdown = (e) => { stage.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); last = snap(); };
+    stage.onpointermove = (e) => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const now = snap();
+      if (last && now.d && last.d) this.s *= now.d / last.d;
+      if (last) { this.x += now.x - last.x; this.y += now.y - last.y; }
+      last = now;
+      this.apply();
+    };
+    stage.onpointerup = stage.onpointercancel = (e) => { pts.delete(e.pointerId); last = pts.size ? snap() : null; };
+    const z = $('#cropZoom');
+    z.oninput = () => { z.dragging = true; this.s = this.min + (this.max - this.min) * (z.value / 1000); this.apply(); };
+    z.onchange = () => { z.dragging = false; };
+  },
+  async save() {
+    const N = 720, k = N / this.F, { naturalWidth: w, naturalHeight: h } = this.img;
+    const c = document.createElement('canvas');
+    c.width = c.height = N;
+    const g = c.getContext('2d');
+    g.fillStyle = '#121212'; g.fillRect(0, 0, N, N);
+    const dw = w * this.s * k, dh = h * this.s * k;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(this.img, (N - dw) / 2 + this.x * k, (N - dh) / 2 + this.y * k, dw, dh);
+    const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.88));
+    const r = await fetch('/api/cover/' + encodeURIComponent(this.id), { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob }).catch(() => null);
+    if (!r?.ok) return toast("Couldn't save the photo");
+    COVERS[this.id] = Date.now(); store.set('covers', COVERS);
+    popOv();
+    toast('Cover updated');
+    setTimeout(() => render(scrollY), 250);
+  },
+  close() {
+    const el = $('#crop');
+    if (el) { el.hidden = true; el.innerHTML = ''; }
+    if (this.url) { URL.revokeObjectURL(this.url); this.url = ''; }
+    this.img = null;
+  },
+};
 /** "¿Quitar las descargas?" para una playlist o álbum (descargado o descargándose). */
 function askRemoveDownloads(tracks, name) {
   const n = tracks.filter((t) => DL.has(t.id) || DL.busy(t.id)).length;

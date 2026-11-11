@@ -593,3 +593,19 @@ body.has-mini .fabs { bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe-b) 
 .row.nf .th, .row.nf .t1 { opacity: .45; }
 .row.nf .t2 span { opacity: .6; }
 .dlg-btns .ok.danger { background: #f28b82; color: #202124; }
+/* Portada propia de la playlist: el lápiz sobre la carátula y el recorte, como una foto de perfil. */
+.ed-cover { position: relative; display: block; margin: 0 auto; padding: 0; background: none; border-radius: 8px; }
+.ed-cam { position: absolute; right: 8px; bottom: 8px; width: 36px; height: 36px; border-radius: 50%; background: rgba(0,0,0,.65); display: grid; place-items: center; color: #fff; }
+.ed-cam .ic { width: 20px; height: 20px; }
+#crop { position: fixed; inset: 0; z-index: 90; background: #000; display: flex; flex-direction: column; padding-top: var(--nt); padding-bottom: var(--safe-b); touch-action: none; }
+#crop[hidden] { display: none; }
+.crop-top { display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 12px 0 4px; }
+.crop-top .ttl { font-size: 20px; font-weight: 500; }
+.crop-stage { flex: 1; display: grid; place-items: center; overflow: hidden; touch-action: none; }
+.crop-frame { position: relative; width: min(88vw, 56vh); aspect-ratio: 1; overflow: visible; }
+.crop-frame img { position: absolute; left: 0; top: 0; transform-origin: center; will-change: transform; user-select: none; -webkit-user-drag: none; pointer-events: none; }
+/* Lo que queda afuera del cuadro, oscurecido (como al recortar una foto de perfil). */
+.crop-frame::after { content: ""; position: absolute; inset: 0; border: 2px solid rgba(255,255,255,.9); border-radius: 4px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.62); pointer-events: none; }
+.crop-bottom { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+#cropZoom { width: 100%; accent-color: #fff; }
+.crop-modes { display: flex; gap: 12px; }
