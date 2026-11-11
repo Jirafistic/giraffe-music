@@ -562,3 +562,13 @@ body.has-mini .fabs { bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe-b) 
 .tg-status { margin: -6px auto 16px; width: max-content; padding: 4px 12px; border-radius: 12px; background: rgba(30,142,62,.2); color: #81c995; font-size: 13px; font-weight: 500; }
 .tg-scan { width: 100%; height: 56px; border-radius: 12px; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 16px; font-weight: 500; margin-bottom: 20px; }
 .tg-scan .ic { width: 28px; height: 28px; }
+.tg-people { margin: 0 -8px 16px; }
+.tg-person { display: flex; align-items: center; gap: 12px; padding: 8px; }
+.tg-person .grow { flex: 1; min-width: 0; }
+.tg-person .t1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-av { width: 40px; height: 40px; border-radius: 50%; background: #3f51b5; color: #fff; display: grid; place-items: center; font-weight: 700; text-transform: uppercase; flex: none; }
+.tg-person:nth-child(2) .tg-av { background: #00897b; } .tg-person:nth-child(3) .tg-av { background: #c2185b; } .tg-person:nth-child(4) .tg-av { background: #f57c00; }
+.tg-role { display: flex; background: rgba(255,255,255,.08); border-radius: 16px; padding: 2px; flex: none; }
+.tg-role button { height: 30px; padding: 0 12px; border-radius: 14px; font-size: 13px; font-weight: 500; color: var(--fg2); }
+.tg-role button.on { background: rgba(255,255,255,.16); color: var(--fg); }
+.tg-role.fixed { padding: 0 12px; height: 34px; align-items: center; font-size: 13px; color: var(--fg2); background: none; }

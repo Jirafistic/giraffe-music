@@ -68,7 +68,7 @@ enum Mode {
         code: String,
         addr: SocketAddr,
         shared: Shared,
-        members: HashMap<String, Instant>,
+        members: HashMap<String, Member>,
         cmds: Vec<Value>,
         bad_codes: u32,
         stop: Option<tokio::sync::oneshot::Sender<()>>,
@@ -79,9 +79,18 @@ enum Mode {
         member: String,
         shared: Shared,
         count: usize,
+        /// Si el anfitrión le dio permiso para cambiar la música.
+        control: bool,
         ended: bool,
         stop: Arc<std::sync::atomic::AtomicBool>,
     },
+}
+
+struct Member {
+    name: String,
+    seen: Instant,
+    /// "Anfitrión" (puede cambiar la música) o "Invitado" (solo escucha, lo predeterminado).
+    control: bool,
 }
 
 pub struct Together {
@@ -101,8 +110,8 @@ impl Together {
         self.version.send_modify(|v| *v += 1);
     }
 
-    fn count(members: &mut HashMap<String, Instant>) -> usize {
-        members.retain(|_, seen| seen.elapsed() < GONE);
+    fn count(members: &mut HashMap<String, Member>) -> usize {
+        members.retain(|_, m| m.seen.elapsed() < GONE);
         1 + members.len()
     }
 
@@ -114,10 +123,12 @@ impl Together {
             Mode::Off => json!({"mode": "off", "v": v}),
             Mode::Host { code, addr, members, cmds, .. } => {
                 let count = Self::count(members);
-                json!({"mode": "host", "v": v, "code": pretty(code), "addr": addr.to_string(), "count": count, "max": MAX, "cmds": std::mem::take(cmds)})
+                let mut list: Vec<Value> = members.iter().map(|(id, m)| json!({"id": id, "name": m.name, "control": m.control, "since": m.seen.elapsed().as_secs()})).collect();
+                list.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+                json!({"mode": "host", "v": v, "code": pretty(code), "addr": addr.to_string(), "count": count, "max": MAX, "members": list, "cmds": std::mem::take(cmds)})
             }
-            Mode::Guest { code, shared, count, ended, .. } => {
-                json!({"mode": "guest", "v": v, "code": pretty(code), "count": count, "max": MAX, "ended": ended, "state": shared.now()})
+            Mode::Guest { code, shared, count, control, ended, .. } => {
+                json!({"mode": "guest", "v": v, "code": pretty(code), "count": count, "max": MAX, "control": control, "ended": ended, "state": shared.now()})
             }
         }
     }
@@ -187,6 +198,7 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/together/leave", post(leave))
         .route("/api/together/state", post(publish))
         .route("/api/together/cmd", post(command))
+        .route("/api/together/role", post(role))
         .route("/api/together/qr.svg", get(qr))
 }
 
@@ -252,6 +264,8 @@ async fn host(State(app): State<Arc<App>>) -> Response {
 #[derive(Deserialize)]
 struct JoinQ {
     code: String,
+    #[serde(default)]
+    name: String,
     /// Del QR: la dirección exacta del anfitrión (con el código escrito a mano se deduce).
     host: Option<String>,
 }
@@ -266,7 +280,7 @@ async fn join(State(app): State<Arc<App>>, Json(q): Json<JoinQ>) -> Response {
             None => return err(StatusCode::SERVICE_UNAVAILABLE, "no-wifi"),
         },
     };
-    let r = lan_client().post(format!("http://{host}/t/join")).json(&json!({"code": code})).timeout(Duration::from_secs(6)).send().await;
+    let r = lan_client().post(format!("http://{host}/t/join")).json(&json!({"code": code, "name": q.name})).timeout(Duration::from_secs(6)).send().await;
     let v: Value = match r {
         Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
         Ok(r) if r.status() == StatusCode::CONFLICT => return err(StatusCode::CONFLICT, "full"),
@@ -282,6 +296,7 @@ async fn join(State(app): State<Arc<App>>, Json(q): Json<JoinQ>) -> Response {
         member: member.clone(),
         shared: shared_from(&v),
         count: v["count"].as_u64().unwrap_or(2) as usize,
+        control: v["control"].as_bool().unwrap_or(false),
         ended: false,
         stop: stop.clone(),
     };
@@ -313,9 +328,10 @@ async fn follow(app: Arc<App>, host: SocketAddr, code: String, member: String, m
                     break;
                 }
                 since = v["v"].as_u64().unwrap_or(since);
-                if let Mode::Guest { shared, count, .. } = &mut *app.together.mode.lock().unwrap() {
+                if let Mode::Guest { shared, count, control, .. } = &mut *app.together.mode.lock().unwrap() {
                     *shared = shared_from(&v);
                     *count = v["count"].as_u64().unwrap_or(2) as usize;
+                    *control = v["control"].as_bool().unwrap_or(false);
                 }
                 app.together.bump();
             }
@@ -399,6 +415,23 @@ async fn command(State(app): State<Arc<App>>, Json(cmd): Json<Value>) -> Respons
     Json(json!({"ok": ok})).into_response()
 }
 
+#[derive(Deserialize)]
+struct RoleQ {
+    member: String,
+    control: bool,
+}
+
+/// El anfitrión cambia el permiso de alguien (Anfitrión = puede cambiar la música; Invitado = solo escucha).
+async fn role(State(app): State<Arc<App>>, Json(q): Json<RoleQ>) -> Response {
+    if let Mode::Host { members, .. } = &mut *app.together.mode.lock().unwrap() {
+        if let Some(m) = members.get_mut(&q.member) {
+            m.control = q.control;
+        }
+    }
+    app.together.bump();
+    Json(app.together.snapshot()).into_response()
+}
+
 /// El QR de la sesión (lo dibuja el núcleo: un SVG chico, sin librerías en la página).
 async fn qr(State(app): State<Arc<App>>) -> Response {
     let text = match &*app.together.mode.lock().unwrap() {
@@ -417,6 +450,8 @@ struct Who {
     code: String,
     #[serde(default)]
     member: String,
+    #[serde(default)]
+    name: String,
     #[serde(default)]
     since: u64,
 }
@@ -453,10 +488,13 @@ async fn lan_join(State(app): State<Arc<App>>, Json(w): Json<Who>) -> Response {
     {
         let mut m = app.together.mode.lock().unwrap();
         let Mode::Host { members, .. } = &mut *m else { return err(StatusCode::GONE, "ended") };
-        if Together::count(members) >= MAX {
+        let n = Together::count(members);
+        if n >= MAX {
             return err(StatusCode::CONFLICT, "full");
         }
-        members.insert(member.clone(), Instant::now());
+        let name: String = w.name.trim().chars().take(30).collect();
+        let name = if name.is_empty() { format!("#{}", n + 1) } else { name };
+        members.insert(member.clone(), Member { name, seen: Instant::now(), control: false });
     }
     app.together.bump();
     Json(lan_view(&app, Some(&member))).into_response()
@@ -467,12 +505,14 @@ fn lan_view(app: &App, member: Option<&str>) -> Value {
     let mut m = app.together.mode.lock().unwrap();
     match &mut *m {
         Mode::Host { shared, members, .. } => {
+            let mut control = false;
             if let Some(id) = member {
-                if let Some(seen) = members.get_mut(id) {
-                    *seen = Instant::now();
+                if let Some(m) = members.get_mut(id) {
+                    m.seen = Instant::now();
+                    control = m.control;
                 }
             }
-            json!({"v": v, "member": member, "count": Together::count(members), "state": shared.now()})
+            json!({"v": v, "member": member, "count": Together::count(members), "control": control, "state": shared.now()})
         }
         _ => json!({"ended": true}),
     }
@@ -505,8 +545,11 @@ async fn lan_cmd(State(app): State<Arc<App>>, Json(c): Json<Cmd>) -> Response {
         return r;
     }
     if let Mode::Host { cmds, members, .. } = &mut *app.together.mode.lock().unwrap() {
-        if !members.contains_key(&c.member) {
-            return err(StatusCode::FORBIDDEN, "unknown");
+        match members.get(&c.member) {
+            None => return err(StatusCode::FORBIDDEN, "unknown"),
+            // Invitado: solo escucha.
+            Some(m) if !m.control => return err(StatusCode::FORBIDDEN, "no-permission"),
+            _ => {}
         }
         if cmds.len() < 20 {
             cmds.push(c.cmd);

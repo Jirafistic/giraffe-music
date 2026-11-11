@@ -634,15 +634,22 @@ function thumbImg(src, w = 48, cls = '') {
 /** Una carátula que no carga (video borrado, miniatura que no existe, enlace raro): primero
  *  la versión que siempre existe o pasando por el servidor de la app; si tampoco, el cuadro
  *  gris en vez del ícono de imagen rota. Un solo escuchador para todas las imágenes. */
+// La misma nota sobre gris, como imagen (para <img> que el código vuelve a usar, como el mini reproductor).
+const NOART_SRC = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#2a2a2a"/><path transform="translate(6.6 6.6) scale(.45)" fill="#5f5f5f" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/></svg>');
 document.addEventListener('error', (e) => {
   const img = e.target;
-  if (img.tagName !== 'IMG' || img.id === 'plArt' || !img.closest('.th, .art, .cover, .m-head, .ed-cover')) return;
-  const src = img.getAttribute('src') || '', tries = +(img.dataset.f || 0);
-  img.dataset.f = tries + 1;
-  const vi = src.match(/^https:\/\/i\d?\.ytimg\.com\/vi\/([^/]+)\/(?!hqdefault)/);
-  if (tries === 0 && vi) { img.src = `https://i.ytimg.com/vi/${vi[1]}/hqdefault.jpg`; return; }
-  if (tries <= 1 && /^https?:/.test(src)) { img.src = imgUrl(src); return; }
-  img.replaceWith(document.createRange().createContextualFragment(NOART));
+  // La carátula del reproductor y las que se asoman al deslizar tienen su propio manejo (setArt).
+  if (img.tagName !== 'IMG' || img.closest('.pl-art-box')) return;
+  const src = img.getAttribute('src') || '';
+  if (!src || src === NOART_SRC) return;
+  // Cada imagen nueva empieza su propia cadena de intentos (el mini reproductor reusa la misma <img>).
+  if (!img._fb || img._fb.cur !== src) img._fb = { tries: 0 };
+  const fb = img._fb, set = (u) => { fb.cur = u; img.src = u; };
+  const vi = src.match(/^https:\/\/i\d?\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\/(?!hqdefault)/);
+  fb.tries++;
+  if (fb.tries === 1 && vi) return set(`https://i.ytimg.com/vi/${vi[1]}/hqdefault.jpg`);
+  if (fb.tries <= 2 && /^https?:/.test(src)) return set(imgUrl(src));
+  set(NOART_SRC);
 }, true);
 /** Una fila de canción. `sub`: qué va después del artista. */
 function rowHTML(t, k, i, { sub = 'album', num = null, rank = null, handle = false, cls = '' } = {}) {
@@ -1391,13 +1398,15 @@ const romanLine = (t) => settings.lyrRoman && t && hasScript(t) ? `<span class="
 // El núcleo hace la parte de red (ver together.rs). Acá: la ventana, la barra verde y aplicar
 // lo que suena. Una sola consulta en espera mientras hay sesión y la pantalla está prendida.
 const TG = {
-  mode: 'off', v: 0, count: 1, max: 4, code: '', bar: false, tab: 'create', polling: false, last: null,
+  mode: 'off', v: 0, count: 1, max: 4, code: '', bar: false, tab: 'create', view: '', polling: false, last: null, control: false, members: [],
   async init() {
     try { this.apply(await (await fetch('/api/together?since=999999999')).json()); } catch {}
   },
   /** Invitado: los controles van al anfitrión (true = ya se mandó, no hacer nada local). */
   send(cmd) {
     if (this.mode !== 'guest' || this.applying) return false;
+    // Invitado: solo escucha (el anfitrión puede darle permiso desde la barra verde).
+    if (!this.control) { toast('Only the host can change the music'); return true; }
     fetch('/api/together/cmd', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cmd) }).catch(() => {});
     return true;
   },
@@ -1415,7 +1424,10 @@ const TG = {
   apply(s) {
     if (!s || !s.mode) return;
     const was = this.mode;
+    const hadControl = this.control;
     this.mode = s.mode; this.v = s.v || 0; this.count = s.count || 1; this.max = s.max || 4; this.code = s.code || '';
+    this.members = s.members || []; this.control = !!s.control;
+    if (s.mode === 'guest' && was === 'guest' && hadControl !== this.control) toast(this.control ? 'You can now change the music' : 'Only the host can change the music');
     if (s.mode === 'guest' && s.ended) { this.mode = 'off'; toast('Session ended'); fetch('/api/together/leave', { method: 'POST' }).catch(() => {}); }
     if (s.mode === 'host') for (const c of s.cmds || []) this.run(c);
     if (s.mode === 'guest' && s.state?.track) this.follow(s.state);
@@ -1424,22 +1436,20 @@ const TG = {
     // Sesión creada pero nadie se unió: se cierra sola a los 10 minutos.
     clearTimeout(this.idleT);
     if (this.mode === 'host' && this.count < 2) this.idleT = setTimeout(() => { if (this.mode === 'host' && this.count < 2) this.leave(); }, 10 * 60e3);
-    if (OV.includes('menu') && $('#tgDlg')) this.open(this.tab, true);
+    if (OV.includes('menu') && $('#tgDlg')) this.render();
     if (this.mode !== 'off') this.poll();
   },
+  /** Una sola consulta en espera a la vez (nunca dos: se acumularían y dejaría de llegar todo). */
   async poll() {
     if (this.polling || this.mode === 'off' || document.hidden) return;
     this.polling = true;
-    try {
-      while (this.mode !== 'off' && !document.hidden) {
+    while (this.mode !== 'off' && !document.hidden) {
+      try {
         const r = await fetch('/api/together?since=' + this.v);
-        const s = await r.json();
-        this.polling = false; this.apply(s); this.polling = true;
-        if (s.mode === 'off') break;
-      }
-    } catch { await new Promise((ok) => setTimeout(ok, 2000)); }
+        this.apply(await r.json());
+      } catch { await new Promise((ok) => setTimeout(ok, 2000)); }
+    }
     this.polling = false;
-    if (this.mode !== 'off' && !document.hidden) setTimeout(() => this.poll(), 500);
   },
   /** Anfitrión: hace lo que pidió un invitado. */
   run(c) {
@@ -1475,12 +1485,13 @@ const TG = {
     if (b) { b.hidden = !on; if (on) b.textContent = T(`Connected · ${this.count} of ${this.max}`); }
     if (on !== this.bar) { this.bar = on; document.body.classList.toggle('tg-on', on); if (setInsets.top) setInsets(setInsets.top, parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nb')) || 0); }
   },
-  /** La ventana, con el mismo estilo que "Nueva playlist". */
-  async open(tab, refresh) {
+  /** Abre la ventana (o cambia de pestaña si ya está abierta: no se apila otra encima). */
+  async open(tab) {
     if (tab) this.tab = tab;
-    const inSession = this.mode !== 'off' && (this.mode === 'guest' || this.count > 1);
-    if (!inSession && this.tab === 'create' && this.mode !== 'host') {
-      if (NATIVE && NATIVE.onWifi && !NATIVE.onWifi()) { this.tab = 'join'; if (!refresh) toast('Connect to Wi-Fi to listen together'); }
+    // En una sesión, el anfitrión ve primero a las personas conectadas y sus permisos.
+    this.view = !tab && this.mode === 'host' && this.count > 1 ? 'people' : '';
+    if (this.view !== 'people' && this.tab === 'create' && this.mode === 'off') {
+      if (NATIVE && NATIVE.onWifi && !NATIVE.onWifi()) { this.tab = 'join'; toast('Connect to Wi-Fi to listen together'); }
       else {
         try {
           const r = await fetch('/api/together/host', { method: 'POST' });
@@ -1490,32 +1501,52 @@ const TG = {
         } catch { toast('Connect to Wi-Fi to listen together'); this.tab = 'join'; }
       }
     }
-    const seg = `<div class="tg-seg"><button class="${this.tab === 'create' ? 'on' : ''}" data-act="tgTab" data-tab="create">Create</button><button class="${this.tab === 'join' ? 'on' : ''}" data-act="tgTab" data-tab="join">Join</button></div>`;
+    this.render(true);
+  },
+  html() {
     const status = this.mode !== 'off' && this.count > 1 ? `<div class="tg-status">${T(`Connected · ${this.count} of ${this.max}`)}</div>` : '';
+    if (this.view === 'people' && this.mode === 'host') {
+      const row = (name, you, m) => `<div class="tg-person"><div class="tg-av">${esc((name || '?').replace('#', '')[0] || '?')}</div><div class="grow"><div class="t1">${esc(name)}</div>${you ? `<div class="t2">${T('You')}</div>` : ''}</div>
+        ${m ? `<div class="tg-role"><button class="${m.control ? 'on' : ''}" data-act="tgRole" data-m="${esc(m.id)}" data-c="1">${T('Host')}</button><button class="${m.control ? '' : 'on'}" data-act="tgRole" data-m="${esc(m.id)}" data-c="0">${T('Guest')}</button></div>` : `<div class="tg-role fixed">${T('Host')}</div>`}</div>`;
+      return `<div id="tgDlg"><h2>Listen together</h2>${status}
+        <div class="t2 tg-hint" style="text-align:left">${T('Hosts can change the music. Guests can only listen.')}</div>
+        <div class="tg-people">${row(me.name || T('You'), !!me.name)}${this.members.map((m) => row(m.name.startsWith('#') ? `${T('Person')} ${m.name.slice(1)}` : m.name, false, m)).join('')}</div>
+        <button class="tg-scan" data-act="tgTab" data-tab="create">${ic('qr-scan')}<span>${T('Show code')}</span></button>
+        <div class="dlg-btns"><button class="ghost" data-act="tgLeave">End session</button><button class="ok" data-act="dlgCancel">Done</button></div></div>`;
+    }
+    const inSession = this.mode !== 'off' && (this.mode === 'guest' || this.count > 1);
+    const seg = this.mode === 'host' && this.count > 1 ? '' : `<div class="tg-seg"><button class="${this.tab === 'create' ? 'on' : ''}" data-act="tgTab" data-tab="create">Create</button><button class="${this.tab === 'join' ? 'on' : ''}" data-act="tgTab" data-tab="join">Join</button></div>`;
     let body;
     if (this.mode === 'guest') {
-      body = `${status}<div class="tg-code big">${esc(this.code)}</div><div class="t2 tg-hint">${T('You are listening along. Anyone can play, pause or change the song.')}</div>
+      body = `${status}<div class="tg-code big">${esc(this.code)}</div><div class="t2 tg-hint">${T(this.control ? 'The host let you change the music.' : 'You are listening along. Only the host can change the music.')}</div>
         <div class="dlg-btns"><button class="ghost" data-act="dlgCancel">Close</button><button class="ok" data-act="tgLeave">Leave</button></div>`;
     } else if (this.tab === 'create' && this.mode === 'host') {
       body = `${status}<div class="tg-qr"><img src="/api/together/qr.svg?c=${encodeURIComponent(this.code)}" alt=""></div><div class="tg-code">${esc(this.code)}</div>
         <div class="t2 tg-hint">${T('Share this code or QR with up to 3 people on your Wi-Fi')}</div>
-        <div class="dlg-btns"><button class="ghost" data-act="tgLeave">End session</button><button class="ok" data-act="dlgCancel">Done</button></div>`;
+        <div class="dlg-btns"><button class="ghost" data-act="tgLeave">End session</button><button class="ok" data-act="${this.count > 1 ? 'tgPeople' : 'dlgCancel'}">${this.count > 1 ? T('Back') : T('Done')}</button></div>`;
     } else {
       body = `<button class="tg-scan" data-act="tgScan">${ic('qr-scan')}<span>${T('Scan QR code')}</span></button>
         <div class="field"><label>${T('Enter code')}</label><input id="tgCode" maxlength="9" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH"></div>
         <div class="t2 tg-hint">${T('Ask for the code of the person who created the session')}</div>
         <div class="dlg-btns"><button class="ghost" data-act="dlgCancel">Cancel</button><button class="ok" data-act="tgJoin" id="tgJoinBtn" disabled>Join</button></div>`;
     }
-    const html = `<div id="tgDlg"><h2>Listen together</h2>${inSession && this.mode === 'guest' ? '' : seg}${body}</div>`;
-    if (refresh && $('#tgDlg')) $('#menu').innerHTML = L(html);
-    else openDialog(html);
+    return `<div id="tgDlg"><h2>Listen together</h2>${inSession && this.mode === 'guest' ? '' : seg}${body}</div>`;
+  },
+  /** Dibuja la ventana: si ya está abierta se reemplaza su contenido (sin otra entrada en "atrás"). */
+  render(show) {
+    const open = OV.includes('menu') && $('#tgDlg');
+    if (!open && !show) return;
+    const typed = $('#tgCode')?.value || '';
+    if (open) $('#menu').innerHTML = L(this.html());
+    else openDialog(this.html());
     const inp = $('#tgCode');
+    if (inp && typed) inp.value = typed;
     if (inp) inp.oninput = () => { const v = inp.value.toUpperCase().replace(/[^0-9A-Z]/g, ''); inp.value = v.length > 4 ? v.slice(0, 4) + '-' + v.slice(4, 8) : v; $('#tgJoinBtn').disabled = v.length !== 8; };
   },
   async join(code, host) {
     toast('Joining…');
     try {
-      const r = await fetch('/api/together/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, host }) });
+      const r = await fetch('/api/together/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, host, name: me.signedIn ? me.name || '' : '' }) });
       const s = await r.json();
       if (!r.ok) throw new Error(s.error);
       if (OV.includes('menu')) popOv();
@@ -1911,10 +1942,15 @@ const ACT = {
   },
   dlgCancel: () => popOv(),
   together: () => TG.open(),
-  tgTab: (el) => TG.open(el.dataset.tab),
+  tgTab: (el) => { TG.view = ''; TG.open(el.dataset.tab); },
   tgScan: () => { if (NATIVE?.scanQr) NATIVE.scanQr(); else toast('Enter code'); },
   tgJoin: () => TG.join($('#tgCode').value),
   tgLeave: () => TG.leave(),
+  tgPeople: () => { TG.view = 'people'; TG.render(); },
+  tgRole: async (el) => {
+    const r = await fetch('/api/together/role', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ member: el.dataset.m, control: el.dataset.c === '1' }) }).catch(() => null);
+    if (r?.ok) TG.apply(await r.json());
+  },
   delLocalPl: (el) => {
     const at = localPls.findIndex((p) => p.id === el.dataset.id);
     if (at < 0) return;
