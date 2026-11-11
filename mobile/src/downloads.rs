@@ -53,6 +53,8 @@ pub struct Downloads {
     one_at_a_time: tokio::sync::Semaphore,
     /// Las que faltan bajar, en orden. Se guardan para seguir si la app se cierra.
     pending: Mutex<Vec<Value>>,
+    /// Las que YouTube ya no tiene (borradas, privadas, bloqueadas): se saltean y se marcan.
+    failed: Mutex<std::collections::BTreeSet<String>>,
 }
 
 /// La clave de una canción: un generador xorshift a partir de su id.
@@ -111,7 +113,8 @@ impl Downloads {
             }
         }
         let pending = std::fs::read(dir.join("pending.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Ok(Self { dir, index: Mutex::new(index), active: Default::default(), one_at_a_time: tokio::sync::Semaphore::new(1), pending: Mutex::new(pending) })
+        let failed = std::fs::read(dir.join("failed.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        Ok(Self { dir, index: Mutex::new(index), active: Default::default(), one_at_a_time: tokio::sync::Semaphore::new(1), pending: Mutex::new(pending), failed: Mutex::new(failed) })
     }
 
     fn save_index(&self) {
@@ -127,6 +130,14 @@ impl Downloads {
         let tmp = self.dir.join("pending.json.tmp");
         if std::fs::write(&tmp, data).is_ok() {
             let _ = std::fs::rename(tmp, self.dir.join("pending.json"));
+        }
+    }
+
+    fn set_failed(&self, id: &str, failed: bool) {
+        let mut f = self.failed.lock().unwrap();
+        let changed = if failed { f.insert(id.to_owned()) } else { f.remove(id) };
+        if changed {
+            let _ = std::fs::write(self.dir.join("failed.json"), serde_json::to_vec(&*f).unwrap_or_default());
         }
     }
 
@@ -197,7 +208,7 @@ impl Downloads {
             })
             .collect();
         let bytes: u64 = idx.values().map(|e| e.size).sum();
-        json!({"items": items, "active": *self.active.lock().unwrap(), "bytes": bytes})
+        json!({"items": items, "active": *self.active.lock().unwrap(), "bytes": bytes, "failed": *self.failed.lock().unwrap()})
     }
 
     async fn remove(&self, id: &str) {
@@ -213,6 +224,7 @@ pub fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/downloads", get(list).delete(clear))
         .route("/api/downloads/active", get(active).delete(cancel_all))
+        .route("/api/downloads/failed", axum::routing::delete(forget_failed))
         .route("/api/download/{id}", post(start).delete(remove))
         .route("/api/dl/cover/{id}", get(cover))
 }
@@ -227,6 +239,14 @@ async fn list(State(app): State<Arc<App>>) -> Response {
 async fn active(State(app): State<Arc<App>>) -> Response {
     let a = app.downloads.active.lock().unwrap().clone();
     Json(a).into_response()
+}
+
+/// Olvida canciones marcadas como "no se encontró" (por ejemplo, porque se quitaron de la playlist).
+async fn forget_failed(State(app): State<Arc<App>>, Json(ids): Json<Vec<String>>) -> Response {
+    for id in ids {
+        app.downloads.set_failed(&id, false);
+    }
+    Json(json!({"ok": true})).into_response()
 }
 
 /// Cancela todo lo que falta bajar (botón "Cancel" de la notificación).
@@ -287,6 +307,12 @@ async fn start(State(app): State<Arc<App>>, Path(id): Path<String>, Json(track):
     Json(json!({"ok": true})).into_response()
 }
 
+/// "No se encontró": YouTube respondió, pero sin audio para esa canción.
+fn not_found(e: &anyhow::Error) -> bool {
+    let s = format!("{e:#}").to_lowercase();
+    s.contains("no audio stream") || s.contains("unavailable") || s.contains("not available") || s.contains("private") || s.contains("removed")
+}
+
 /// Al abrir la app: vuelve a poner en la cola lo que había quedado pendiente.
 pub fn resume(app: Arc<App>) {
     let list = app.downloads.pending.lock().unwrap().clone();
@@ -308,6 +334,7 @@ fn enqueue(app: &Arc<App>, id: String, track: Value, save: bool) {
         active.insert(id.clone(), 0.0);
     }
     if save {
+        app.downloads.set_failed(&id, false);
         app.downloads.pending.lock().unwrap().push(track.clone());
         app.downloads.save_pending();
     }
@@ -324,7 +351,16 @@ fn enqueue(app: &Arc<App>, id: String, track: Value, save: bool) {
                 Err(e) => {
                     log::warn!("descarga de {id} (intento {}): {e:#}", attempt + 1);
                     let _ = tokio::fs::remove_file(a.downloads.file(&id, "a.part")).await;
-                    if e.to_string().contains("cancelada") || attempt == 5 {
+                    if e.to_string().contains("cancelada") {
+                        break;
+                    }
+                    // YouTube contestó pero no tiene la canción (borrada, privada, bloqueada):
+                    // se prueba una vez más por las dudas y después se saltea, sin trabar la cola.
+                    if not_found(&e) && attempt >= 1 {
+                        a.downloads.set_failed(&id, true);
+                        break;
+                    }
+                    if attempt == 5 {
                         break;
                     }
                     progress(&a, &id, 0.0);
@@ -352,6 +388,8 @@ async fn download(app: &Arc<App>, id: &str, raw: Value) -> anyhow::Result<()> {
     // 1. El audio.
     let mut f = tokio::fs::File::create(&part).await?;
     let mut loud = None;
+    // Demo: las canciones "gone…" hacen de canciones que YouTube ya no tiene.
+    anyhow::ensure!(!(app.demo && id.starts_with("gone")), "no audio stream in visionOS player response");
     let (size, mime) = if app.demo {
         let mut wav = demo::audio(id).to_vec();
         mix(id, 0, &mut wav);

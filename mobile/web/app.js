@@ -65,6 +65,8 @@ const imgUrl = (u) => !u ? '' : u.startsWith('/') ? u : '/api/img?u=' + encodeUR
 // ------------------------------------------------------------------ descargas (las guarda el núcleo nativo)
 const DL = {
   items: new Map(), active: {}, bytes: 0, timer: 0,
+  /** Las que YouTube ya no tiene: se saltean, se marcan con una X y no se pueden escuchar. */
+  failed: new Set(), batches: [],
   has(id) { return this.items.has(id); },
   busy(id) { return id in this.active; },
   thumb(t) { return this.items.get(t.id)?.track.thumb || t.thumb; },
@@ -75,6 +77,8 @@ const DL = {
       this.items = new Map(d.items.map((x) => [x.track.id, x]));
       const finished = [...this.items.keys()].filter((id) => !before.has(id) && this.wasActive?.has(id));
       this.active = d.active; this.bytes = d.bytes;
+      this.failed = new Set(d.failed || []);
+      this.batchesDone();
       if (Object.keys(d.active).length) NATIVE?.dlWatch?.(); // pendientes de la vez anterior
       this.wasActive = new Set(Object.keys(d.active));
       if (finished.length && location.pathname === '/downloads' && !OV.length) setTimeout(render);
@@ -86,12 +90,27 @@ const DL = {
     clearTimeout(this.timer);
     if (Object.keys(this.active).length) this.timer = setTimeout(() => this.refresh(), document.hidden ? 6000 : 1200);
   },
-  async add(tracks, force) {
+  /** Terminó una tanda (una playlist o una canción): avisa las que no se encontraron. */
+  batchesDone() {
+    for (const b of this.batches.slice()) {
+      if ([...b.ids].some((id) => id in this.active)) continue;
+      this.batches.splice(this.batches.indexOf(b), 1);
+      const nf = b.tracks.filter((t) => this.failed.has(t.id));
+      if (!nf.length) continue;
+      if (b.single) { toast(`“${nf[0].title}” wasn't found`); continue; }
+      const pid = b.playlistId, editable = isLocalPl(pid) || (pid && me.signedIn && nf.every((t) => t.setId));
+      if (!editable) { toast(nf.length === 1 ? `“${nf[0].title}” wasn't found` : `${nf.length} songs weren't found and were skipped`); continue; }
+      nfOffer = { pid, name: b.name, tracks: nf };
+      setTimeout(offerRemoveMissing, OV.length ? 1500 : 300);
+    }
+  },
+  async add(tracks, force, batch = {}) {
     tracks = tracks.filter((t) => t && !this.has(t.id) && !this.busy(t.id));
     if (!tracks.length) return;
     if (!force && settings.wifiOnlyDl && NATIVE?.isMetered?.()) {
-      return toast('Downloads are set to Wi-Fi only', { label: 'Download now', fn: () => this.add(tracks, true) });
+      return toast('Downloads are set to Wi-Fi only', { label: 'Download now', fn: () => this.add(tracks, true, batch) });
     }
+    this.batches.push({ ...batch, single: tracks.length === 1 && !batch.playlistId, tracks, ids: new Set(tracks.map((t) => t.id)) });
     for (const t of tracks) {
       this.active[t.id] = 0;
       await fetch('/api/download/' + encodeURIComponent(t.id), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(t) }).catch(() => {});
@@ -113,6 +132,7 @@ const DL = {
 
 function dlUI() {
   for (const el of $$('[data-dlb]')) el.toggleAttribute('hidden', !DL.has(el.dataset.dlb));
+  for (const el of $$('[data-nfb]')) { const nf = DL.failed.has(el.dataset.nfb); el.toggleAttribute('hidden', !nf); el.closest('.row')?.classList.toggle('nf', nf); }
   const t = cur();
   if (t) {
     const done = DL.has(t.id), busy = DL.busy(t.id);
@@ -121,7 +141,7 @@ function dlUI() {
   }
   for (const el of $$('[data-dlall]')) {
     const ids = (LISTS.get(el.dataset.dlall)?.tracks || []).map((x) => x.id);
-    const done = ids.length && ids.every((id) => DL.has(id));
+    const done = ids.length && ids.every((id) => DL.has(id) || DL.failed.has(id));
     const busy = ids.filter((id) => DL.busy(id));
     const p = busy.length ? ids.reduce((s, id) => s + (DL.has(id) ? 1 : DL.active[id] || 0), 0) / ids.length : 0;
     el.innerHTML = ic(done ? 'dl-done' : 'dl') + (busy.length ? `<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" stroke-dasharray="${(p * 125.7).toFixed(1)} 200"/></svg>` : '');
@@ -636,7 +656,7 @@ function go(path) {
 // Miniaturas de video: anchas como en YouTube, o cuadradas (ajuste "Square thumbnails").
 const wideTh = (t) => !settings.squareThumbs && (t.wide || t.video);
 const eb = (t) => (t.explicit ? '<span class="eb">E</span>' : '');
-const dlb = (t) => `<svg class="dlb" data-dlb="${esc(t.id)}"${DL.has(t.id) ? '' : ' hidden'}><use href="#i-dl-mini"/></svg>`;
+const dlb = (t) => `<svg class="dlb" data-dlb="${esc(t.id)}"${DL.has(t.id) ? '' : ' hidden'}><use href="#i-dl-mini"/></svg><svg class="nfb" data-nfb="${esc(t.id)}"${DL.failed.has(t.id) ? '' : ' hidden'}><use href="#i-nf"/></svg>`;
 // Sin carátula: el cuadro gris con una nota, como YouTube Music.
 const NOART = `<svg class="noart" viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/></svg>`;
 /** Direcciones de carátula que el WebView puede cargar: siempre https (sin "//…" ni http). */
@@ -670,7 +690,7 @@ function rowHTML(t, k, i, { sub = 'album', num = null, rank = null, handle = fal
   const curCls = cur()?.id === t.id ? ' cur' : '';
   const left = rank != null ? `<div class="rank">${rank}<small>▲</small></div><div class="th">${thumbImg(DL.thumb(t))}</div>`
     : num != null ? `<div class="num">${num}</div>` : `<div class="th${wideTh(t) ? ' wide' : ''}">${thumbImg(DL.thumb(t), wideTh(t) ? 86 : 48)}${curCls ? `<div class="eq-ov">${ic('eq')}</div>` : ''}</div>`;
-  return `<div class="row${curCls}${cls}" data-act="row" data-list="${k}" data-i="${i}">${left}<div class="tx"><div class="t1">${esc(t.title)}</div><div class="t2">${eb(t)}${dlb(t)}<span>${esc(artists(t))}${extra}</span></div></div>`
+  return `<div class="row${curCls}${cls}${DL.failed.has(t.id) ? ' nf' : ''}" data-act="row" data-list="${k}" data-i="${i}">${left}<div class="tx"><div class="t1">${esc(t.title)}</div><div class="t2">${eb(t)}${dlb(t)}<span>${esc(artists(t))}${extra}</span></div></div>`
     + (handle ? `<button class="icon-btn q-drag" data-drag="${i}" aria-label="Move">${ic('drag')}</button>` : `<button class="icon-btn" data-act="menu" data-list="${k}" data-i="${i}" aria-label="More">${ic('more')}</button>`) + '</div>';
 }
 function cardHTML(c, k, i) {
@@ -1872,7 +1892,7 @@ const MENU = {
   mShare: ({ t }) => share(t.title + ' – ' + artists(t), 'https://music.youtube.com/watch?v=' + t.id),
   mShuffle: ({ tracks, name }) => { P.play(shuffleArr(tracks), 0, name, { shuffle: true }); P.unshuffled = tracks.slice(); },
   mListRadio: ({ tracks }) => P.radio(tracks[0]),
-  mDlAll: ({ tracks }) => DL.add(tracks),
+  mDlAll: ({ tracks, name, id }) => DL.add(tracks, false, { name, playlistId: id }),
   mSleep: () => sleepMenu(),
   mForget: ({ q, token }) => {
     searches = searches.filter((s) => s !== q); store.set('searches', searches);
@@ -1943,6 +1963,7 @@ const ACT = {
     const l = LISTS.get(el.dataset.list), i = +el.dataset.i;
     if (!l) return;
     const t = l.tracks[i];
+    if (DL.failed.has(t.id) && !addTarget) return toast("This song wasn't found. It can't be played or downloaded");
     if (addTarget && location.pathname === '/search' && el.closest('#page')) {
       el.classList.add('added');
       return addToPlaylist(addTarget.id, { tracks: [t] });
@@ -1983,13 +2004,13 @@ const ACT = {
     openMenu(`<div class="m-head"><div class="tx"><div class="t1">${esc(l.name)}</div><div class="t2">${l.tracks.length} songs</div></div></div>`, [
       ['shuffle', 'Shuffle play', 'mShuffle'], ['radio', 'Start radio', 'mListRadio'], ['playnext', 'Play next', 'mNext'], ['queue', 'Add to queue', 'mQueue'], ['dl', 'Download', 'mDlAll'],
       ['save', 'Save to playlist', 'mToPlaylist'],
-    ], { tracks: l.tracks, name: l.name });
+    ], { tracks: l.tracks, name: l.name, id: l.playlistId });
   },
   dlAll: (el) => {
     const l = LISTS.get(el.dataset.list);
     if (!l?.tracks.length) return;
-    if (l.tracks.every((t) => DL.has(t.id))) return toast('Already downloaded');
-    DL.add(l.tracks);
+    if (l.tracks.every((t) => DL.has(t.id) || DL.failed.has(t.id))) return toast('Already downloaded');
+    DL.add(l.tracks.filter((t) => !DL.failed.has(t.id)), false, { name: l.name, playlistId: l.playlistId });
   },
   shareList: (el) => { const l = LISTS.get(el.dataset.list); share(l?.name || 'Giraffe Music', location.href.startsWith('http://127.') ? 'https://music.youtube.com/' : location.href); },
   saveLib: (el) => {
@@ -2110,6 +2131,8 @@ const ACT = {
     toast('Removed from library', { label: 'Undo', fn: () => { localPls.splice(at, 0, p); saveLocalPls(); render(scrollY); } });
   },
   migMove: () => migrateLocal(),
+  nfKeep: () => { nfOffer = null; popOv(); dlUI(); },
+  nfRemove: () => removeMissing(),
   doUpdate: (el) => { const u = el.dataset.url; popOv(); toast('Downloading update…'); NATIVE?.installUpdate(u); },
   checkUpdate: () => checkUpdate(true),
   lyrScript: () => { settings.lyrRoman = !settings.lyrRoman; saveSettings(); openSheet('lyrics', true); toast(settings.lyrRoman ? 'Showing pronunciation' : 'Original lyrics only'); },
@@ -2418,6 +2441,40 @@ async function onLoginCookie(cookie) {
     render();
     if (localPls.length) setTimeout(offerMigration, 1200);
   } catch (e) { toast("Couldn't sign in. Try again."); }
+}
+/** Al terminar de bajar una playlist: las que no se encontraron, ¿se quitan de la playlist? */
+let nfOffer = null;
+function offerRemoveMissing() {
+  const o = nfOffer;
+  if (!o) return;
+  if (OV.length) return setTimeout(offerRemoveMissing, 1500);
+  const n = o.tracks.length;
+  openDialog(`<h2>${esc(T(n === 1 ? '1 song wasn’t found' : `${n} songs weren’t found`))}</h2>
+    <div class="t2" style="white-space:normal;margin-bottom:12px">${esc(T(`YouTube no longer has them (deleted or private), so they can't be downloaded or played. Remove them from “${o.name}”?`))}</div>
+    <div class="mig-list">${o.tracks.map((t) => `<div class="row nf"><div class="th">${thumbImg(t.thumb)}</div><div class="tx"><div class="t1">${esc(t.title)}</div><div class="t2"><svg class="nfb"><use href="#i-nf"/></svg><span>${esc(artists(t))}</span></div></div></div>`).join('')}</div>
+    <div class="dlg-btns"><button class="ghost" data-act="nfKeep">Keep</button><button class="ok" data-act="nfRemove">Remove</button></div>`);
+}
+async function removeMissing() {
+  const o = nfOffer;
+  nfOffer = null;
+  popOv();
+  if (!o) return;
+  let ok = 0;
+  if (isLocalPl(o.pid)) {
+    const p = localPl(o.pid), gone = new Set(o.tracks.map((t) => t.id));
+    if (p) { const before = p.tracks.length; p.tracks = p.tracks.filter((t) => !gone.has(t.id)); ok = before - p.tracks.length; saveLocalPls(); }
+  } else {
+    for (const t of o.tracks) {
+      const r = await fetch(`/api/me/playlist/${encodeURIComponent(o.pid)}/remove`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ videoId: t.id, setId: t.setId }) }).catch(() => null);
+      if (r?.ok) ok++;
+    }
+    mem.delete('/api/playlist/' + encodeURIComponent(o.pid)); mem.delete('/api/me/library');
+  }
+  // Ya no están en la playlist: no hace falta seguir marcándolas.
+  await fetch('/api/downloads/failed', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify(o.tracks.map((t) => t.id)) }).catch(() => {});
+  for (const t of o.tracks) DL.failed.delete(t.id);
+  toast(ok === o.tracks.length ? (ok === 1 ? 'Removed 1 song from the playlist' : `Removed ${ok} songs from the playlist`) : "Couldn't remove some songs");
+  if (location.pathname.includes(o.pid)) render(scrollY);
 }
 /** Después de acceder: ofrece pasar a la cuenta las playlists que se hicieron sin ella. */
 function offerMigration() {

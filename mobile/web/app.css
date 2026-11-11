@@ -588,3 +588,7 @@ body.has-mini .fabs { bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe-b) 
 .tg-role button { height: 30px; padding: 0 12px; border-radius: 14px; font-size: 13px; font-weight: 500; color: var(--fg2); }
 .tg-role button.on { background: rgba(255,255,255,.16); color: var(--fg); }
 .tg-role.fixed { padding: 0 12px; height: 34px; align-items: center; font-size: 13px; color: var(--fg2); background: none; }
+/* Canciones que YouTube ya no tiene: atenuadas, con una X roja junto al artista. */
+.nfb { width: 16px; height: 16px; flex: none; fill: #f28b82; margin-right: 4px; vertical-align: -3px; }
+.row.nf .th, .row.nf .t1 { opacity: .45; }
+.row.nf .t2 span { opacity: .6; }

@@ -83,3 +83,5 @@ body { letter-spacing: .005em; }
 .pl-artist { font-size: 17px; }
 .pchip, .chip-pair { height: 40px; border-radius: 20px; font-size: 15px; font-weight: 600; }
 .pl-from { font-weight: 500; }
+/* El anillo de progreso de la descarga, del tamaño de los botones nuevos (52 px). */
+.actions2 .round-btn .ring { inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); }
