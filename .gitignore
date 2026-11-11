@@ -10,3 +10,5 @@ server/.wrangler/
 server/node_modules/
 .playwright-cli/
 target-bisect/
+mobile/android/.kotlin/
+mobile/android/carmusic/build/

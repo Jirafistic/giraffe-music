@@ -85,6 +85,9 @@ jobs:
             abi=$(basename "$f" | sed 's/^app-//; s/-release.apk$//')
             cp "$f" "../out/giraffe-music-$abi.apk"
           done
+          # Giraffe CarMusic (Android Auto): un solo APK, con su propia versión.
+          cv=$(grep -o 'versionName = "[^"]*"' android/carmusic/build.gradle.kts | cut -d'"' -f2)
+          cp android/carmusic/build/outputs/apk/release/carmusic-release.apk "../out/giraffe-carmusic-$cv.apk"
       - uses: actions/upload-artifact@v5
         with: { name: giraffe-music-apk, path: out/*.apk }
       - name: Notas del release

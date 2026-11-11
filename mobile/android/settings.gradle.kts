@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "GiraffeMusic"
-include(":app")
+include(":app", ":carmusic")

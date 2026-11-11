@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Giraffe CarMusic</string>
+    <string name="home">Home</string>
+    <string name="library">Library</string>
+    <string name="downloads">Downloads</string>
+    <string name="liked">Liked Music</string>
+    <string name="search">Search</string>
+    <string name="shuffle">Shuffle</string>
+    <string name="repeat">Repeat</string>
+    <string name="like">Like</string>
+    <string name="welcome_title">Giraffe CarMusic in your car</string>
+    <string name="welcome_body">Giraffe isn\'t from the Play Store, so Android Auto hides it until you allow it once:\n\n1. Open Android Auto settings on your phone.\n2. Scroll down and tap \"Version\" 10 times, then accept.\n3. Tap ⋮ → Developer settings.\n4. Turn on \"Unknown sources\".\n\nConnect your phone to the car: Giraffe CarMusic will be there.</string>
+    <string name="open_auto">Open Android Auto settings</string>
+    <string name="got_it">Got it</string>
+    <string name="lyrics_in_car">Lyrics in the car</string>
+    <string name="android_auto_help">Android Auto help</string>
+    <string name="check_updates">Check for updates</string>
+    <string name="update_available">Update available</string>
+    <string name="update">Update</string>
+    <string name="later">Later</string>
+    <string name="latest">You\'re on the latest version</string>
+    <string name="nothing_playing">Nothing playing</string>
+    <string name="error">Something went wrong</string>
+    <string name="empty">Nothing here yet</string>
+    <string name="songs">Songs</string>
+    <string name="albums">Albums</string>
+    <string name="playlists">Playlists</string>
+    <string name="download">Download</string>
+    <string name="remove_download">Remove download</string>
+    <string name="download_all">Download all</string>
+    <string name="downloading">Downloading</string>
+    <string name="downloading_n">Downloading %1$d of %2$d</string>
+    <string name="download_done">Downloads finished</string>
+    <string name="download_queued">Downloading soon</string>
+    <string name="cancel">Cancel</string>
+    <string name="sign_in">Sign in with Google</string>
+    <string name="sign_out">Sign out</string>
+    <string name="sign_in_hint">Sign in to see your playlists and music. Tap here.</string>
+    <string name="signed_as">Account: %1$s</string>
+    <string name="linked_on">Linked with Giraffe Music</string>
+    <string name="linked_off">Working on its own (install Giraffe Music 0.5.02+ to link them)</string>
+    <string name="search_hint">Search songs, albums and playlists</string>
+</resources>
