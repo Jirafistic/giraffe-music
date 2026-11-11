@@ -511,7 +511,7 @@ async function trackUI(t) {
   lyr = null;
   if (sheetTab) openSheet(sheetTab, true);
   else $('#lyrScript').hidden = true;
-  for (const r of $$('.row.cur')) r.classList.remove('cur');
+  markCur(t);
   // El color del reproductor sale de la carátula (una vez por canción).
   const c = await colorOf(thumb);
   if (cur() !== t || !c) return;
@@ -519,6 +519,17 @@ async function trackUI(t) {
   root.setProperty('--pl-c1', tone(c, 24));
   root.setProperty('--pl-c2', tone(c, 9, 60));
   root.setProperty('--mini-bg', tone(c, 14, 40));
+}
+/** La canción que suena, marcada en las listas abiertas (las barritas sobre la carátula):
+ *  se saca de la anterior y se pone en la nueva. */
+function markCur(t) {
+  for (const r of $$('.row.cur')) { r.classList.remove('cur'); r.querySelector('.eq-ov')?.remove(); }
+  if (!t) return;
+  for (const r of $$('.row[data-list][data-i]')) {
+    if (LISTS.get(r.dataset.list)?.tracks[+r.dataset.i]?.id !== t.id) continue;
+    r.classList.add('cur');
+    r.querySelector('.th')?.insertAdjacentHTML('beforeend', `<div class="eq-ov">${ic('eq')}</div>`);
+  }
 }
 function likeUI() {
   const t = cur();
@@ -1028,10 +1039,15 @@ function collHero(o) {
  *  y las acciones abajo (descargar, guardar/editar, compartir… aleatorio y reproducir). */
 function collHeroNew({ title, thumb, by, meta, desc, k, thumbHTML, save }) {
   afterRender = null;
+  // Sin repetir el dueño: si el subtítulo ya lo nombra, se saca de ahí.
+  if (by && meta) {
+    const name = by.replace(/<[^>]*>/g, '');
+    meta = meta.split(' • ').filter((p) => p.replace(/<[^>]*>/g, '').trim() !== name.trim() && !/^(Playlist|Album|Álbum)$/i.test(p.trim())).join(' • ');
+  }
   const art = thumbHTML ? `<div class="h2-art h2-ph">${thumbHTML}</div>` : `<div class="h2-art">${thumb ? `<img src="${esc(fixUrl(hiRes(thumb)))}" alt="" decoding="async">` : NOART}</div>`;
   return `<div class="top-sentinel" style="position:absolute;top:160px;height:1px;width:1px"></div><div class="hero2">${art}
     <h1>${esc(title)}</h1>${desc ? `<div class="desc">${esc(desc)}</div>` : ''}
-    <div class="meta2">${by ? `<span class="by">${by}</span> • ` : ''}${meta}</div>
+    <div class="meta2">${by ? `<span class="by">${by}</span>` : ''}${by && meta ? ' • ' : ''}${meta}</div>
     <div class="actions2">
       <button class="round-btn" data-act="dlAll" data-list="${k}" data-dlall="${k}" aria-label="Download"></button>
       ${save ?? ''}
