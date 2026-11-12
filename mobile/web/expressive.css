@@ -1,0 +1,282 @@
+/* Giraffe Expressive — Giraffe Music 1.0.
+ *
+ * Material 3 Expressive sobre el orden de YouTube Music: formas más redondas que cambian al
+ * tocarlas, rebote leve, el color de la canción que suena y algo de blur. Se carga sobre
+ * app.css + new.css (que dan el orden y las medidas de YouTube Music).
+ *
+ * Batería, igual que siempre: las animaciones solo mueven transform y opacidad (las hace la
+ * GPU sin volver a dibujar la página), nada se anima solo ni en bucle, y el blur se usa en
+ * pocas barras chicas. Todo se ajusta en Configuración > Aspecto:
+ *   html.fx-soft / html.fx-off  animaciones suaves (sin rebote) o apagadas
+ *   html.fx-blur                blur en barras, mini reproductor y menús
+ *   html.sh-medium / sh-square  esquinas medianas o casi rectas (por defecto, redondas) */
+
+:root {
+  /* El color: sale de la carátula de lo que suena (app.js). Antes de eso, el ámbar de la jirafa. */
+  --acc: hsl(39 100% 72%);
+  --acc-c: hsl(39 42% 22%);
+  --on-acc: hsl(39 70% 11%);
+  --on-acc-c: hsl(39 100% 88%);
+  --tint: hsl(39 20% 9%);
+
+  /* Esquinas */
+  --r-xs: 8px;
+  --r-s: 12px;
+  --r-m: 18px;
+  --r-l: 26px;
+  --r-xl: 32px;
+  --r-full: 999px;
+
+  /* Movimiento: el resorte rebota un poco al llegar. */
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+  --spring-soft: cubic-bezier(.3, 1.3, .6, 1);
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --d-press: .32s;
+  --d-move: .42s;
+  --press: .88;
+  --press-big: .97;
+
+  /* Superficies: sólidas sin blur, translúcidas con él. */
+  --glass: #141414;
+  --glass-top: var(--bg);
+  --glass-blur: none;
+  --surface: #1c1c1c;
+}
+
+/* ------------------------------------------------------------------ Aspecto */
+html.fx-blur {
+  --glass: rgba(26, 26, 26, .66);
+  --glass-top: rgba(3, 3, 3, .7);
+  --glass-blur: blur(20px) saturate(1.5);
+}
+html.sh-medium { --r-xs: 6px; --r-s: 8px; --r-m: 12px; --r-l: 16px; --r-xl: 20px; --r-full: 20px; }
+html.sh-square { --r-xs: 2px; --r-s: 3px; --r-m: 4px; --r-l: 6px; --r-xl: 8px; --r-full: 6px; }
+html.fx-soft { --spring: var(--ease); --spring-soft: var(--ease); --press: .95; --press-big: .99; }
+html.fx-off *, html.fx-off *::before, html.fx-off *::after { animation: none !important; transition: none !important; }
+html.fx-off { --press: 1; --press-big: 1; }
+
+/* ------------------------------------------------------------------ al tocar: se hunde y rebota */
+.icon-btn, .chip, .pchip, .chip-pair button, .pill, .play-btn, .round-btn, .big-play, .fab, .fab-mini,
+.gbtn, .dlg-btns button, .share-fab, .seg button, .tg-role button {
+  transition: transform var(--d-press) var(--spring), border-radius var(--d-move) var(--spring), background-color .2s, color .2s;
+}
+.icon-btn:active, .chip:active, .pchip:active, .chip-pair button:active, .pill:active, .round-btn:active, .fab-mini:active,
+.gbtn:active, .dlg-btns button:active, .share-fab:active, .seg button:active, .tg-role button:active {
+  transform: scale(var(--press)); opacity: 1;
+}
+.card, .row, .ex-btn, .mood, .set-row, .top-res, .acc-item, .sugg, .menu button.mi, .tg-scan, .storage {
+  transition: transform var(--d-press) var(--spring), background-color .2s;
+}
+.card:active, .row:active, .ex-btn:active, .mood:active, .set-row:active, .top-res:active, .acc-item:active, .sugg:active, .tg-scan:active {
+  transform: scale(var(--press-big)); opacity: 1;
+}
+.row:active, .set-row:active, .sugg:active, .acc-item:active { background: rgba(255, 255, 255, .06); }
+
+/* ------------------------------------------------------------------ texto */
+.sh-title, .pg-ttl { font-weight: 800; letter-spacing: -.02em; }
+.sec-ttl { font-weight: 800; letter-spacing: -.01em; }
+.hero h1, .hero2 h1, .a-hero h1 { font-weight: 800; letter-spacing: -.02em; }
+
+/* ------------------------------------------------------------------ barra de arriba */
+.topbar, .sbar { background: var(--glass-top); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+.topbar.clear:not(.solid), .topbar.glass:not(.solid) { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.topbar.solid { background: var(--glass-top); }
+.sbar { background: color-mix(in srgb, var(--surface) 80%, transparent); }
+html:not(.fx-blur) .sbar { background: var(--surface); }
+.avatar { box-shadow: 0 0 0 2px var(--acc-c); }
+
+/* ------------------------------------------------------------------ chips: al elegirlos se vuelven píldora del color */
+.chip { border-radius: var(--r-s); background: #232323; }
+.chip.on { background: var(--acc); color: var(--on-acc); border-radius: var(--r-full); }
+.pill { border-radius: var(--r-full); }
+.pill.solid { background: var(--acc); color: var(--on-acc); border-color: var(--acc); }
+.s-tabs { background: transparent; border-bottom: 0; gap: 8px; padding: 4px 16px 0; }
+.s-tabs button { height: 40px; padding: 0 16px; border-radius: var(--r-full); text-transform: none; font-size: 15px; font-weight: 600; transition: background-color .25s, color .25s; }
+.s-tabs button.on { background: var(--acc-c); color: var(--on-acc-c); }
+.s-tabs button.on::after { display: none; }
+
+/* ------------------------------------------------------------------ carátulas y filas */
+.card .art { border-radius: var(--r-m); }
+.card.round .art, .row.round .th { border-radius: 50%; }
+.row .th { border-radius: var(--r-xs); }
+.row.cur { background: color-mix(in srgb, var(--acc) 14%, transparent); border-radius: var(--r-s); }
+.col .row.cur { margin-right: 8px; }
+.eq-ov { background: color-mix(in srgb, var(--acc-c) 70%, transparent); }
+.eq-ov .ic { color: var(--acc); }
+.card .play-ov { border-radius: var(--r-s); background: var(--acc); color: var(--on-acc); }
+.lib-grid .card .art { border-radius: var(--r-l); }
+.top-res { background: var(--tint); border-radius: var(--r-l); }
+.ex-btn { border-radius: var(--r-l); background: #1c1c1c; }
+.mood { border-radius: var(--r-s); border-left-width: 0; box-shadow: inset 6px 0 0 var(--mc, #888); }
+.storage, .signin { border-radius: var(--r-l); background: var(--tint); }
+.storage .bar { height: 8px; border-radius: 4px; }
+.storage .bar i { background: var(--acc); border-radius: 4px; }
+.skel { border-radius: var(--r-s); }
+
+/* ------------------------------------------------------------------ barra de abajo: indicador píldora */
+.nav { background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+.nav a { position: relative; }
+.nav a::before {
+  content: ""; position: absolute; top: 6px; left: 50%; width: 60px; height: 32px; margin-left: -30px;
+  border-radius: min(16px, var(--r-full)); background: var(--acc-c); z-index: -1;
+  transform: scaleX(.3); opacity: 0;
+  transition: transform var(--d-move) var(--spring), opacity .18s;
+}
+.nav { isolation: isolate; }
+.nav a.on::before { transform: none; opacity: 1; }
+.nav a .ic { transition: transform var(--d-press) var(--spring); }
+.nav a:active .ic { transform: scale(.82); }
+.nav a.on .ic { color: var(--on-acc-c); }
+.nav a.on span { font-weight: 700; }
+
+/* ------------------------------------------------------------------ mini reproductor */
+.mini {
+  border-radius: var(--r-l);
+  background: color-mix(in srgb, var(--mini-bg, var(--surface)) 100%, transparent);
+  transition: transform var(--d-press) var(--spring);
+}
+html.fx-blur .mini {
+  background: color-mix(in srgb, var(--mini-bg, var(--surface)) 72%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+}
+.mini:not([hidden]) { animation: rise .5s var(--spring); }
+.mini:active { transform: scale(.98); }
+.mini-art { border-radius: var(--r-s); }
+.mini-prog { height: 3px; border-radius: 2px; left: 16px; right: 16px; bottom: 4px; background: rgba(255, 255, 255, .14); }
+.mini-prog i { background: var(--acc); border-radius: 2px; }
+@keyframes rise { from { transform: translateY(24px) scale(.96); opacity: 0; } }
+
+/* ------------------------------------------------------------------ reproductor */
+.player { transition: transform .42s var(--spring-soft), visibility 0s .42s; }
+.player.open { transition: transform .42s var(--spring-soft); }
+/* Un resplandor quieto del color de la canción, arriba (se dibuja una vez). */
+.player::before {
+  content: ""; position: absolute; inset: -20% -30% auto; height: 70%; pointer-events: none; z-index: 0;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--acc) 28%, transparent), transparent);
+}
+.pl-top, .pl-body, .pl-bottom { position: relative; z-index: 1; }
+.pl-art-box .pa { border-radius: var(--r-xl); }
+.pl-video { border-radius: var(--r-l); }
+/* Cambio de canción: la carátula entra con un rebote. */
+.pl-art-box .pa.pop { animation: artPop .5s var(--spring); }
+@keyframes artPop { from { transform: scale(.9); opacity: .4; } }
+.pl-title { font-weight: 800; letter-spacing: -.02em; }
+.pchip, .chip-pair { background: rgba(255, 255, 255, .1); border-radius: var(--r-full); }
+.pchip.on, .chip-pair button.on { color: var(--acc); }
+.seg { border-radius: var(--r-full); }
+.seg button.on { background: var(--acc-c); color: var(--on-acc-c); }
+
+/* Barra de tiempo como el deslizador Expressive: gruesa, del color, con una manija vertical. */
+.seek { height: 36px; margin-top: 16px; }
+.seek-track { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .14); }
+.seek-track i { border-radius: 4px; }
+#seekBuf { background: rgba(255, 255, 255, .12); }
+#seekFill { background: var(--acc); }
+.seek-track b { width: 4px; height: 24px; margin: -12px 0 0 -2px; border-radius: 2px; background: #fff; transition: height .25s var(--spring), margin .25s var(--spring); }
+.seek.drag .seek-track { height: 8px; }
+.seek.drag .seek-track b { width: 4px; height: 32px; margin: -16px 0 0 -2px; }
+.times { margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* Reproducir: cuadrado redondeado en pausa, píldora ancha mientras suena (cambia de forma). */
+.controls { margin-top: 14px; }
+.play-btn {
+  width: 80px; height: 76px; border-radius: var(--r-l); background: var(--acc); color: var(--on-acc);
+  transition: width var(--d-move) var(--spring), border-radius var(--d-move) var(--spring), transform var(--d-press) var(--spring), background-color .4s;
+}
+body.playing .play-btn { width: 104px; border-radius: min(38px, var(--r-full)); }
+html.sh-square body.playing .play-btn { border-radius: var(--r-l); }
+.play-btn:active { transform: scale(.9); }
+.controls .icon-btn.big { width: 56px; height: 56px; border-radius: var(--r-m); background: rgba(255, 255, 255, .08); }
+.controls .icon-btn.big:active { transform: scale(.85); }
+.controls .icon-btn:not(.off):not(.big) { color: var(--acc); }
+.controls .icon-btn.off { color: var(--fg2); }
+
+.grab { width: 40px; height: 5px; border-radius: 3px; }
+.q-list .row.cur { margin: 0 8px; }
+
+/* Hoja de letra / relacionados */
+.sheet { transition: transform .42s var(--spring-soft), visibility 0s .42s; }
+.sheet.open { transition: transform .42s var(--spring-soft); }
+.sh-card { border-radius: var(--r-xl) var(--r-xl) 0 0; }
+.lyrics.synced p { transform-origin: 0 50%; transition: color .3s, transform .4s var(--spring); }
+.lyrics.synced p.on { color: #fff; transform: scale(1.03); }
+.share-fab { background: var(--acc); color: var(--on-acc); border-radius: var(--r-m); }
+
+/* ------------------------------------------------------------------ menús, diálogos y avisos */
+.scrim { background: rgba(0, 0, 0, .55); }
+html.fx-blur .scrim { -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+/* El menú baja un poco más que la pantalla: así el rebote no deja un hueco abajo. */
+.menu {
+  bottom: -32px; padding-bottom: calc(40px + var(--safe-b));
+  border-radius: var(--r-xl) var(--r-xl) 0 0; background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  transition: transform .4s var(--spring-soft);
+}
+html:not(.fx-blur) .menu { background: #1c1c1c; }
+.menu button.mi { border-radius: var(--r-s); margin: 0 8px; width: calc(100% - 16px); padding: 0 16px; gap: 20px; }
+.menu button.mi:active { background: rgba(255, 255, 255, .08); transform: scale(.98); }
+.menu .m-head img, .menu .m-head .noart { border-radius: var(--r-s); }
+.menu.dlg {
+  bottom: auto; padding-bottom: 24px; border-radius: var(--r-xl); background: #1c1c1c;
+  transform: scale(.9); opacity: 0; transition: transform .38s var(--spring), opacity .15s;
+}
+.menu.dlg.open { transform: none; opacity: 1; }
+.dlg-btns .ok { background: var(--acc); color: var(--on-acc); }
+.dlg-btns .ok:disabled { background: rgba(255, 255, 255, .14); color: rgba(255, 255, 255, .4); }
+.field { border-radius: var(--r-s); }
+.field:focus-within { border-color: var(--acc); }
+.toast { border-radius: var(--r-m); background: #eaeaea; transition: transform .38s var(--spring), opacity .2s; }
+.toast b { color: color-mix(in srgb, var(--on-acc) 70%, #0b57d0); }
+.fab { border-radius: var(--r-m); background: var(--acc); color: var(--on-acc); box-shadow: 0 4px 14px rgba(0, 0, 0, .35); }
+.fab-mini { border-radius: var(--r-m); background: var(--acc-c); color: var(--on-acc-c); }
+.fab:active { transform: scale(var(--press)); }
+
+/* ------------------------------------------------------------------ cabeceras de playlist, álbum y artista */
+.hero .cover { border-radius: var(--r-l); }
+.actions2 .big-play, .big-play { background: var(--acc); color: var(--on-acc); border-radius: var(--r-l); }
+.actions2 .big-play:active, .big-play:active { border-radius: 50%; transform: scale(.92); }
+.actions2 .round-btn, .round-btn { border-radius: var(--r-m); }
+.ring circle { stroke: var(--acc); }
+.h2-art { border-radius: 0 0 var(--r-xl) var(--r-xl); }
+
+/* ------------------------------------------------------------------ Configuración: grupos de tarjetas */
+.set-row { margin: 0 12px 2px; padding: 10px 16px; border-radius: calc(var(--r-xs) / 2); background: #151515; min-height: 68px; }
+.set-row:first-child, :not(.set-row) + .set-row { border-top-left-radius: var(--r-l); border-top-right-radius: var(--r-l); }
+.set-row:last-child, .set-row:has(+ :not(.set-row)) { border-bottom-left-radius: var(--r-l); border-bottom-right-radius: var(--r-l); margin-bottom: 12px; }
+.set-h { padding: 18px 28px 8px; color: var(--acc); font-weight: 700; }
+.acct { margin: 0 12px 12px; border-radius: var(--r-l); background: var(--tint); }
+.srow { margin: 0 12px 2px; border-radius: calc(var(--r-xs) / 2); background: #151515; }
+/* Interruptor Expressive: la bolita crece al encenderse. */
+.switch { width: 52px; height: 32px; border-radius: 16px; background: #2a2a2a; box-shadow: inset 0 0 0 2px #777; }
+.switch::after { top: 8px; left: 8px; width: 16px; height: 16px; background: #888; transition: transform var(--d-move) var(--spring), width .3s var(--spring), height .3s var(--spring), top .3s var(--spring), left .3s var(--spring), background-color .2s; }
+.switch.on { background: var(--acc); box-shadow: none; }
+.switch.on::after { top: 4px; left: 4px; width: 24px; height: 24px; transform: translateX(20px); background: var(--on-acc); }
+/* Elegir entre opciones (Aspecto, Escuchar juntos): segmentos del color. */
+.tg-role, .tg-seg { border-radius: var(--r-full); }
+.tg-role button.on, .tg-seg button.on { background: var(--acc-c); color: var(--on-acc-c); }
+
+/* Vista previa de Aspecto */
+.look-prev { margin: 4px 12px 14px; padding: 16px; border-radius: var(--r-l); background: var(--tint); display: flex; align-items: center; gap: 14px; }
+.look-prev .lp-art { width: 56px; height: 56px; border-radius: var(--r-s); background: linear-gradient(135deg, var(--acc), var(--acc-c)); flex: none; }
+.look-prev .grow { flex: 1; min-width: 0; }
+.look-prev .lp-btn { width: 56px; height: 52px; border-radius: var(--r-m); background: var(--acc); color: var(--on-acc); display: grid; place-items: center; flex: none; }
+.look-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.look-opts button { height: 36px; padding: 0 14px; border-radius: var(--r-s); background: #262626; font-size: 14px; font-weight: 600; color: var(--fg2); }
+.look-opts button.on { background: var(--acc); color: var(--on-acc); border-radius: var(--r-full); }
+.set-row.look { flex-direction: column; align-items: stretch; gap: 0; }
+
+/* ------------------------------------------------------------------ Samples y otros */
+.smp .s-art { border-radius: var(--r-xl); }
+.smp .s-side .round-btn { border-radius: var(--r-m); }
+.ed-cover, .tg-qr, .tg-scan { border-radius: var(--r-l); }
+.wn-ic { border-radius: var(--r-l); background: linear-gradient(135deg, var(--acc), var(--acc-c)); }
+.wn-ic .ic { color: var(--on-acc); }
+.wn-dots i.on { background: var(--acc); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mini:not([hidden]), .pl-art-box .pa.pop { animation: none; }
+}
+.look-prev .lp-btn { transition: transform var(--d-press) var(--spring), border-radius var(--d-move) var(--spring), width var(--d-move) var(--spring); }
+.look-prev .lp-btn.pop { width: 76px; border-radius: 26px; }
+html.sh-square .look-prev .lp-btn.pop { border-radius: var(--r-m); }
+.look-prev .t2, .look-prev .t2 span { white-space: normal; }

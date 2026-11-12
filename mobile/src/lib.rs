@@ -45,6 +45,7 @@ mod downloads;
 mod together;
 mod covers;
 mod web;
+mod youtube;
 
 #[cfg(target_os = "android")]
 mod android;

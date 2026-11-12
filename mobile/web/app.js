@@ -30,7 +30,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('gm.' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('gm.' + k, JSON.stringify(v)); } catch {} },
 };
-const settings = Object.assign({ autoplay: true, skipNonMusic: true, dataSaver: false, libGrid: false, libSort: 'recent', squareThumbs: true, normalize: true, swipeArt: true, wifiOnlyDl: true, qMobile: 'normal', resumeHeadphones: false, lyrRoman: false, lang: 'auto', ui: 'new' }, store.get('settings', {}));
+const settings = Object.assign({ autoplay: true, skipNonMusic: true, dataSaver: false, libGrid: false, libSort: 'recent', squareThumbs: true, normalize: true, swipeArt: true, wifiOnlyDl: true, qMobile: 'normal', resumeHeadphones: false, lyrRoman: false, lang: 'auto', anim: 'full', blur: true, shape: 'round' }, store.get('settings', {}));
 const saveSettings = () => store.set('settings', settings);
 let liked = store.get('liked', {});        // id -> {t, at}
 let disliked = store.get('disliked', {});  // id -> 1
@@ -511,6 +511,8 @@ function addHistory(t) {
 const playIcons = () => {
   const h = P.playing ? '#i-pause' : '#i-play';
   for (const id of ['miniPlayIc', 'plPlayIc', 'shPlayIc']) $('#' + id).setAttribute('href', h);
+  // Expressive: el botón de reproducir cambia de forma mientras suena.
+  document.body.classList.toggle('playing', !!P.playing);
 };
 function repeatUI() {
   $('#repeatIc').setAttribute('href', P.repeat === 'one' ? '#i-repeat1' : '#i-repeat');
@@ -539,6 +541,9 @@ async function trackUI(t) {
   const thumb = DL.thumb(t);
   $('#miniArt').src = thumb || ''; $('#shArt').src = thumb || '';
   setArt($('#plArt'), t, artSrc(t));
+  // La carátula nueva entra con un rebote (solo si el reproductor está a la vista).
+  const pa = $('#plArt').parentElement;
+  if ($('#player').classList.contains('open')) { pa.classList.remove('pop'); void pa.offsetWidth; pa.classList.add('pop'); }
   $('#miniTitle').textContent = $('#shTitle').textContent = $('#plTitle').textContent = t.title;
   const sub = artists(t);
   $('#miniSub').textContent = $('#shSub').textContent = sub;
@@ -560,6 +565,17 @@ async function trackUI(t) {
   root.setProperty('--pl-c1', tone(c, 24));
   root.setProperty('--pl-c2', tone(c, 9, 60));
   root.setProperty('--mini-bg', tone(c, 14, 40));
+  accent(c);
+}
+/** Expressive: el color de la app sale de la canción que suena (como el color dinámico de
+ *  Android). Claro sobre oscuro; si la carátula es gris, un blanco apenas teñido. */
+function accent([h, s]) {
+  const r = document.documentElement.style, sat = Math.min(s, 85);
+  r.setProperty('--acc', `hsl(${h} ${sat}% ${sat < 15 ? 84 : 74}%)`);
+  r.setProperty('--acc-c', `hsl(${h} ${Math.min(s, 45)}% 22%)`);
+  r.setProperty('--on-acc', `hsl(${h} ${Math.min(s, 70)}% 11%)`);
+  r.setProperty('--on-acc-c', `hsl(${h} ${Math.min(s, 100)}% 88%)`);
+  r.setProperty('--tint', `hsl(${h} ${Math.min(s, 22)}% 9%)`);
 }
 /** La canción que suena, marcada en las listas abiertas (las barritas sobre la carátula):
  *  se saca de la anterior y se pone en la nueva. */
@@ -1222,7 +1238,7 @@ async function pageSearch(_, my) {
     const hits = all.filter((t) => (t.title + ' ' + artists(t)).toLowerCase().includes(ql));
     return tabs + (hits.length ? listHTML(hits, 'Library') : `<div class="empty">No results in your library</div>`);
   }
-  const chipsF = [['songs', 'Songs'], ['videos', 'Videos'], ['albums', 'Albums'], ['playlists', 'Featured playlists'], ['artists', 'Artists']];
+  const chipsF = [['songs', 'Songs'], ['videos', 'Videos'], ['youtube', 'YouTube'], ['albums', 'Albums'], ['playlists', 'Featured playlists'], ['artists', 'Artists']];
   const chips = `<div class="chips">${chipsF.map(([k, n]) => `<button class="chip${f === k ? ' on' : ''}" data-act="sFilter" data-f="${f === k ? '' : k}">${n}</button>`).join('')}</div>`;
   const d = await api(`/api/search?q=${encodeURIComponent(q)}${f ? '&filter=' + f : ''}`);
   if (my !== token) return;
@@ -1231,7 +1247,8 @@ async function pageSearch(_, my) {
   let html = tabs + chips;
   if (!f) {
     // Resultado principal: el artista si el nombre coincide, si no la primera canción.
-    const art = d.artists?.[0], song = d.songs?.[0];
+    // Si YouTube Music no tiene la canción, el principal sale de YouTube común.
+    const art = d.artists?.[0], song = d.songs?.[0] || d.youtube?.[0];
     const lyr = d.lyrics || [];
     if (lyr.length && !(art && art.title.toLowerCase() === q.toLowerCase())) {
       // La frase está en la letra: esa canción es el resultado principal, con el verso.
@@ -1246,6 +1263,8 @@ async function pageSearch(_, my) {
   }
   if (d.songs?.length) html += lst('Songs', d.songs, 'songs') + listHTML(d.songs, q, { mode: 'radio', sub: 'plays' });
   if (d.videos?.length) html += lst('Videos', d.videos, 'videos') + listHTML(d.videos, q, { mode: 'radio', sub: 'none' });
+  // YouTube común: lo que YouTube Music no tiene (covers, en vivo, subidas). Suena como canción.
+  if (d.youtube?.length) html += lst('From YouTube', d.youtube, 'youtube') + listHTML(d.youtube, q, { mode: 'radio', sub: 'plays' });
   if (d.albums?.length) html += lst('Albums', d.albums, 'albums') + cardRows(d.albums);
   if (d.artists?.length) html += lst('Artists', d.artists, 'artists') + cardRows(d.artists);
   if (d.playlists?.length) html += lst('Featured playlists', d.playlists, 'playlists') + cardRows(d.playlists);
@@ -1338,7 +1357,7 @@ async function pageAccount() {
 // --- Configuración: categorías, como la de YouTube Music.
 let audioTools = null;
 async function pageSettings(section) {
-  const TITLES = { general: 'General', playback: 'Playback & restrictions', data: 'Data saving', downloads: 'Downloads & storage', privacy: 'Privacy & data', transfer: 'Transfer from Spotify', about: 'About' };
+  const TITLES = { general: 'General', look: 'Appearance', playback: 'Playback & restrictions', data: 'Data saving', downloads: 'Downloads & storage', privacy: 'Privacy & data', transfer: 'Transfer from Spotify', about: 'About' };
   setTop(detailBar(TITLES[section] || 'Settings'));
   $top.classList.add('solid');
   const sw = (k, t1, t2) => `<div class="set-row" data-act="setting" data-k="${k}"><div class="tx"><div class="t1">${t1}</div><div class="t2">${t2}</div></div><div class="switch${settings[k] ? ' on' : ''}"></div></div>`;
@@ -1349,13 +1368,22 @@ async function pageSettings(section) {
       : signinCard('Get your playlists, likes, history and recommendations from YouTube Music.');
     const link = (k, t2) => `<a class="set-row" href="/settings/${k}"><div class="tx"><div class="t1">${TITLES[k]}</div>${t2 ? `<div class="t2">${t2}</div>` : ''}</div></a>`;
     return acct + '<div style="height:8px"></div>'
-      + link('general') + link('playback') + link('data') + link('downloads') + link('privacy')
+      + link('general') + link('look', 'Animations, blur and corners') + link('playback') + link('data') + link('downloads') + link('privacy')
       + link('transfer', 'Copy your Spotify playlists to YouTube Music') + link('about');
   }
   if (section === 'general') {
     const LN = { auto: 'System default', en: 'English', es: 'Español' };
     return row('Language', T(LN[settings.lang] || LN.auto), 'data-act="langMenu"')
       + sw('squareThumbs', 'Square thumbnails', 'Show every thumbnail in lists as a square, videos too');
+  }
+  if (section === 'look') {
+    // Aspecto: se aplica al instante, sin reiniciar.
+    const opts = (k, list) => `<div class="look-opts">${list.map(([v, n]) => `<button class="${(settings[k] || list[0][0]) === v ? 'on' : ''}" data-act="setLook" data-k="${k}" data-v="${v}">${T(n)}</button>`).join('')}</div>`;
+    const box = (t1, t2, inner) => `<div class="set-row look"><div class="tx"><div class="t1">${t1}</div><div class="t2">${t2}</div></div>${inner}</div>`;
+    return `<div class="look-prev"><div class="lp-art"></div><div class="grow"><div class="t1">Giraffe Expressive</div><div class="t2"><span>${T('Colors from the song that is playing')}</span></div></div><button class="lp-btn" data-act="lookDemo" aria-label="Play">${ic('play')}</button></div>`
+      + box('Animations', 'Full has a light bounce. Off saves the most battery.', opts('anim', [['full', 'Full'], ['soft', 'Soft'], ['off', 'Off']]))
+      + `<div class="set-row" data-act="setting" data-k="blur"><div class="tx"><div class="t1">Blur</div><div class="t2">Frosted glass on the bars, the mini player and menus</div></div><div class="switch${settings.blur ? ' on' : ''}"></div></div>`
+      + box('Corners', 'The shape of artwork, buttons and cards', opts('shape', [['round', 'Round'], ['medium', 'Medium'], ['square', 'Square']]));
   }
   if (section === 'playback') {
     if (NATIVE && !audioTools) try { audioTools = JSON.parse(NATIVE.audioTools()); } catch { audioTools = {}; }
@@ -1391,9 +1419,7 @@ async function pageSettings(section) {
   if (section === 'transfer') { afterRender = () => watchTransfer(); return transferHTML(); }
   let st = {};
   try { st = await api('/api/status', 0); } catch {}
-  const uiNow = settings.ui === 'old' ? 'old' : 'new';
   return row(`Giraffe Music ${esc(NATIVE?.appVersion?.() || st.version || '')}${st.demo ? ' (demo)' : ''}`, 'No ads, ever. Built on the ytm-rs core (GPL-3.0).', '')
-    + `<div class="srow ui-pick"><div class="grow"><div class="t1">Interface</div><div class="t2">${T(uiNow === 'new' ? 'New: like the latest YouTube Music' : 'Old: the classic Giraffe Music')}</div></div><div class="tg-role"><button class="${uiNow === 'old' ? 'on' : ''}" data-act="setUi" data-v="old">${T('Old')}</button><button class="${uiNow === 'new' ? 'on' : ''}" data-act="setUi" data-v="new">${T('New')}</button></div></div>`
     + row('Battery', NATIVE ? 'Native player with audio offload, a 256 MB audio cache and nothing running in the background.' : 'Web player', '')
     + (NATIVE ? row('Check for updates', `Version ${esc(NATIVE.appVersion?.() || '')}`, 'data-act="checkUpdate"') : '')
     + row('Source code', 'github.com/grapedjuice/ytm-rs', 'data-act="openUrl" data-url="https://github.com/grapedjuice/ytm-rs"');
@@ -1714,10 +1740,21 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && TG
 // ------------------------------------------------------------------ novedades (después de actualizar)
 // Una tarjeta por novedad, contadas como para cualquier persona. Se ven una sola vez.
 const CHANGES = {
+  '1.0': [
+    ['spark', 'Giraffe Expressive', 'Giraffe Expressive',
+      'A whole new look, still in YouTube Music\'s order: rounder shapes, a light bounce, a bit of blur and the colors of the song that is playing.',
+      'Una interfaz totalmente nueva, con el mismo orden de YouTube Music: formas más redondas, un rebote leve, algo de blur y los colores de la canción que suena.'],
+    ['palette', 'Make it yours', 'A tu gusto',
+      'Settings → Appearance: choose full, soft or no animations, turn blur on or off and pick round, medium or square corners.',
+      'Configuración → Aspecto: elige animaciones completas, suaves o apagadas, activa o no el blur y elige esquinas redondas, medianas o rectas.'],
+    ['video', 'Nothing missing', 'Que no falte nada',
+      'Search now also looks on regular YouTube, for covers, live versions and songs YouTube Music doesn\'t have. They play as audio, like any song.',
+      'La búsqueda ahora también mira en YouTube común: covers, versiones en vivo y canciones que YouTube Music no tiene. Suenan como audio, igual que cualquier canción.'],
+  ],
   '0.5.0': [
     ['spark', 'A fresh new look', 'Una interfaz nueva',
-      'Giraffe looks like the latest YouTube Music: big covers, a floating mini player and roomier lists. Prefer the classic one? Settings → About → Interface.',
-      'Giraffe se ve como el último YouTube Music: carátulas grandes, mini reproductor flotante y listas más amplias. ¿Preferís la clásica? Configuración → Información → Interfaz.'],
+      'Giraffe looks like the latest YouTube Music: big covers, a floating mini player and roomier lists.',
+      'Giraffe se ve como el último YouTube Music: carátulas grandes, mini reproductor flotante y listas más amplias.'],
     ['search', 'Search inside a playlist', 'Busca dentro de una playlist',
       'Tap the magnifier in a playlist or album to find a song in it. Not there? Search everywhere with one tap.',
       'Toca la lupa dentro de una playlist o álbum para encontrar una canción. ¿No está? Búscala en todos lados con un toque.'],
@@ -2123,13 +2160,11 @@ const ACT = {
   tgScan: () => { if (NATIVE?.scanQr) NATIVE.scanQr(); else toast('Enter code'); },
   tgJoin: () => TG.join($('#tgCode').value),
   tgLeave: () => TG.leave(),
-  setUi: (el) => {
-    if ((settings.ui === 'old' ? 'old' : 'new') === el.dataset.v) return;
-    settings.ui = el.dataset.v; saveSettings();
-    toast('Restarting…');
-    // La app se reinicia sola (la música sigue sonando): así solo se carga la interfaz elegida.
-    setTimeout(() => (NATIVE?.restart ? NATIVE.restart() : location.reload()), 400);
+  setLook: (el) => {
+    settings[el.dataset.k] = el.dataset.v; saveSettings(); applyLook(settings);
+    for (const b of el.parentElement.children) b.classList.toggle('on', b === el);
   },
+  lookDemo: (el) => { el.classList.add('pop'); setTimeout(() => el.classList.remove('pop'), 500); },
   lyrSeek: (el) => {
     const l = lyr?.lines?.[+el.dataset.i];
     if (!l || !cur()) return;
@@ -2297,6 +2332,7 @@ const ACT = {
     el.querySelector('.switch')?.classList.toggle('on', settings[k]);
     if (k === 'dataSaver' && settings[k] && V.mode === 'video') setMode('song');
     if (k === 'squareThumbs') { if (OV.includes('queue')) queueUI(); }
+    if (k === 'blur') applyLook(settings);
     if (k === 'resumeHeadphones') NATIVE?.setPref('resumeHeadphones', settings[k] ? '1' : '0');
     if (k === 'normalize') { NATIVE?.setNormalize(settings.normalize); if (!NATIVE) P.eng.normalize?.(); }
   },

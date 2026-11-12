@@ -185,6 +185,13 @@ pub fn search(q: &str, _filter: &str) -> Value {
         "albums": albums.iter().map(|&i| album_card(i)).collect::<Vec<_>>(),
         "playlists": (0..3).map(mix_card).collect::<Vec<_>>(),
         "videos": [],
+        // YouTube común: versiones que YouTube Music no tiene.
+        "youtube": songs.iter().take(3).map(|&i| {
+            let mut t = track(i);
+            t["title"] = json!(format!("{} (en vivo)", SONGS[i].title));
+            t["wide"] = json!(true);
+            t
+        }).collect::<Vec<_>>(),
         // Demo: todas las canciones tienen la misma letra; la primera sirve de ejemplo.
         "lyrics": lyrics(SONGS[0].title)["synced"].as_str().and_then(|l| crate::api::lyric_match(l, q)).map(|line| {
             let mut t = track(0);

@@ -221,24 +221,36 @@ async fn search(State(app): AppState, Query(q): Query<SearchQ>) -> R {
         "albums" => json!({"albums": cards(ytm::Filter::Albums).await}),
         "artists" => json!({"artists": cards(ytm::Filter::Artists).await}),
         "playlists" => json!({"playlists": cards(ytm::Filter::Playlists).await}),
+        "youtube" => json!({"youtube": youtube_search(&app, query).await?.iter().map(track).collect::<Vec<_>>()}),
         _ => {
             // La pestaña "Todo": varias búsquedas a la vez, como las secciones de la app.
-            let (songs, artists, albums, playlists, videos, by_lyrics) = tokio::join!(
+            let (songs, artists, albums, playlists, videos, by_lyrics, yt) = tokio::join!(
                 ytm::search_songs(api, query, auth),
                 cards(ytm::Filter::Artists),
                 cards(ytm::Filter::Albums),
                 cards(ytm::Filter::Playlists),
                 ytm::search_videos(api, query, auth),
                 search_by_lyrics(&app, query),
+                youtube_search(&app, query),
             );
-            let songs = songs?;
+            // Si YouTube Music falla o no encuentra nada, igual quedan los de YouTube.
+            let songs = match songs {
+                Ok(s) => s,
+                Err(e) if yt.as_ref().is_ok_and(|y| !y.is_empty()) => { log::debug!("search: {e}"); vec![] }
+                Err(e) => return Err(e.into()),
+            };
+            let videos = videos.unwrap_or_default();
+            // De YouTube común, solo lo que YouTube Music no trajo ya.
+            let seen: std::collections::HashSet<&str> = songs.iter().chain(videos.iter()).map(|t| t.id.as_str()).collect();
+            let yt: Vec<Value> = yt.unwrap_or_default().iter().filter(|t| !seen.contains(t.id.as_str())).take(6).map(track).collect();
             json!({
                 "lyrics": by_lyrics,
                 "songs": songs.iter().take(6).map(track).collect::<Vec<_>>(),
                 "artists": artists.into_iter().take(4).collect::<Vec<_>>(),
                 "albums": albums.into_iter().take(6).collect::<Vec<_>>(),
                 "playlists": playlists.into_iter().take(6).collect::<Vec<_>>(),
-                "videos": videos.unwrap_or_default().iter().take(4).map(track).collect::<Vec<_>>(),
+                "videos": videos.iter().take(4).map(track).collect::<Vec<_>>(),
+                "youtube": yt,
             })
         }
     };
@@ -476,6 +488,12 @@ pub(crate) fn lyric_match(lyrics: &str, query: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Videos de YouTube común para una búsqueda (ver `youtube.rs`).
+async fn youtube_search(app: &App, query: &str) -> anyhow::Result<Vec<Track>> {
+    let visitor = app.api.visitor_data(false).await?;
+    crate::youtube::search(&proxy::http(), query, &visitor).await
 }
 
 /// Canciones cuya letra tiene la frase buscada (LRCLIB), ya encontradas en YouTube Music.
